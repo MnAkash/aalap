@@ -1,2 +1,3 @@
 include requirements.txt
 recursive-include aalap/resources *
+recursive-include examples *.py

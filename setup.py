@@ -20,6 +20,7 @@ setup(
     packages=find_packages(include=["aalap", "aalap.*"]),
     include_package_data=True,
     package_data={"aalap": ["resources/models/*"]},
+    data_files=[("examples", ["examples/simple_dialogue.py"])],
     python_requires=">=3.9",
     install_requires=read_requirements(),
     entry_points={
