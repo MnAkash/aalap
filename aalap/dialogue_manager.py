@@ -64,7 +64,7 @@ VAD_CALIBRATION_FRAMES      = 20  # 20*CAPTURE_FRAME_MS = 400 ms to calibrate VA
 
 # Wake word
 USE_WAKEWORD = True
-WAKEWORD_KEYWORDS = ("hey_jarvis",)
+WAKEWORD_KEYWORDS = "hey_jarvis"
 WAKEWORD_WINDOW_MS = 500
 WAKEWORD_EMA_ALPHA     = 0.30   # smoothing, 0..1
 WAKEWORD_ARM_THRESH    = 0.001   # cross up -> fire
@@ -251,20 +251,29 @@ class StreamingASR:
 
 # ---------------- Dialog manager ----------------
 class DialogManager:
-    IDLE, LISTENING, RECORDING, SPEAKING, TRANSCRIBING = "IDLE", "LISTENING", "RECORDING", "SPEAKING", "TRANSCRIBING"
+    IDLE, LISTENING, RECORDING, THINKING, SPEAKING, TRANSCRIBING = (
+        "IDLE",
+        "LISTENING",
+        "RECORDING",
+        "THINKING",
+        "SPEAKING",
+        "TRANSCRIBING",
+    )
     '''
     IDLE            - waiting for wake word or programmatic trigger
     LISTENING       - waiting for user speech to start recording
     RECORDING       - recording user speech
+    THINKING        - waiting on an external policy decision result to reply with
     SPEAKING        - playing back TTS
     TRANSCRIBING    - transcribing recorded user speech
     '''
     def __init__(self,
-                 model: str = "base.en",
+                 model: str = WHISPER_MODEL,
+                 device: str = WHISPER_DEVICE,
                  mic_index: int = None,
                  speaker_index: int = None,
                  silence_ms_after_speech=SILENCE_MS_AFTER_SPEECH,
-                 wakeword_keywords: Union[str, List[str]] = WAKEWORD_KEYWORDS, # set to None to disable
+                 wakeword_keywords: Union[str, List[str]] = WAKEWORD_KEYWORDS, # set to None to disable, default is "hey_jarvis"
                  wakeword_model_paths: Optional[Union[str, List[str]]] = None,
                  vad_aggressiveness=WEBRTC_AGGRESSIVENESS,
                  vad_backend: str = VAD_BACKEND,
@@ -275,18 +284,21 @@ class DialogManager:
                  save_transcript_audio: bool = SAVE_TRANSCRIPT_AUDIO,
                  transcript_audio_dir = TRANSCRIPT_AUDIO_DIR,
                  on_transcript: Optional[Callable[[str], None]] = None,
-                 on_status: Optional[Callable[[str], None]] = None):
+                 on_status: Optional[Callable[[str], None]] = None,
+                 external_policy: Optional[Callable[[str], str]] = None,
+                 ):
         """
         Dialog manager that wires together wake word, VAD, streaming ASR, and Piper TTS.
 
         Args:
-            model (str, default="base.en"): Specifies the size of the transcription
+            model (str, default="base.en"): Specifies the transcription
                 model to use or the path to a converted model directory.
                 Valid options are 'tiny', 'tiny.en', 'base', 'base.en',
                 'small', 'small.en', 'medium', 'medium.en', 'large-v1',
                 'large-v2'.
-                If a specific size is provided, the model is downloaded
-                from the Hugging Face Hub.
+                If not cached already model is downloaded from the Hugging Face Hub.
+            
+            device (str): Computation device for ASR. One of "auto", "cpu", "cuda". Default "auto".
 
             mic_index (int, optional): Input device index for microphone.
 
@@ -326,13 +338,17 @@ class DialogManager:
 
             on_status (Callable[[str], None], optional): Callback function that
                 is called with status updates when the dialog state changes.
+
+            external_policy (Callable[[str], str], optional): If provided, called
+                with the transcribed text to produce a reply. Dialog enters
+                THINKING while waiting; inactivity timers are paused.
             
         """
         self.state = self.IDLE
         self.package_dir         = Path(__file__).resolve().parent.parent
         self.piper_model_path    = str(self.package_dir / "resources" / "models" / "en_US-amy-medium.onnx")
 
-        self.asr        = StreamingASR(model=model, device="auto", compute_type="auto")
+        self.asr        = StreamingASR(model=model, device=device, compute_type="auto")
         self.tts_engine = PiperTTS(self.piper_model_path, PIPER_LENGTH_SCALE, PIPER_NOISE_SCALE, PIPER_NOISE_W)
         self.tts_player = TTSPlayer(device=speaker_index, sample_rate=SAMPLE_RATE, capture_frame_samples=CAPTURE_FRAME_SAMPLES)
         self.vad        = VAD(
@@ -353,6 +369,9 @@ class DialogManager:
         self.silence_ms_after_speech = silence_ms_after_speech  # endpoint hangover
         self.on_transcript = on_transcript
         self.on_status = on_status
+        self.external_policy = external_policy
+        self._policy_thread: Optional[threading.Thread] = None
+        self._policy_result_q: queue.Queue[str] = queue.Queue(maxsize=1)
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._last_status = None
@@ -432,6 +451,26 @@ class DialogManager:
             policy = ""
             
         return policy
+
+    def _start_external_policy(self, user_text: str):
+        """Kick off an external policy in a background thread."""
+        if self._policy_thread and self._policy_thread.is_alive():
+            return
+
+        def _worker():
+            try:
+                result = self.external_policy(user_text) if self.external_policy else ""
+            except Exception as e:
+                print(f"[Policy] Error: {e}")
+                result = ""
+            try:
+                self._policy_result_q.put_nowait(result or "")
+            except queue.Full:
+                pass
+
+        self._policy_result_q = queue.Queue(maxsize=1)
+        self._policy_thread = threading.Thread(target=_worker, daemon=True)
+        self._policy_thread.start()
 
     def _save_audio_debug(self, pcm16: np.ndarray, sample_rate: int, transcript: str = ""):
         """
@@ -520,6 +559,30 @@ class DialogManager:
                 clean = cap  # raw audio, no AEC
                 clean_f32 = to_float32(clean)
 
+                # ========================= THINKING mode =========================
+                if self.state == self.THINKING:
+                    self.mic.drain()  # avoid buildup while waiting
+                    if self._policy_thread and (not self._policy_thread.is_alive()): # When external policy returns some result
+                        try:
+                            reply = self._policy_result_q.get_nowait()
+                        except queue.Empty:
+                            reply = ""
+                        if reply:
+                            self.speak(reply)  # sets SPEAKING
+                        else:
+                            if session_active:
+                                self._set_state(self.LISTENING)
+                            else:
+                                self._set_state(self.IDLE)
+                        silence_ms_accum = 0
+                        preroll_frames.clear()
+                        utterance_frames = []
+                        utterance_ms = 0
+                        had_any_speech = False
+                        last_activity_ms = int(time.time() * 1000.0)
+                    time.sleep(0.001)
+                    continue
+
                 # ========================= SPEAKING mode =========================
                 if self.state == self.SPEAKING:
                     last_activity_ms = int(time.time() * 1000.0)
@@ -528,9 +591,9 @@ class DialogManager:
                     if not self.tts_player.is_playing():
                         # return to LISTENING if session is active, else idle
                         if session_active:
+                            self.mic.drain()  # drop any frames captured during TTS playback
                             self._set_state(self.LISTENING)
                             utterance_frames = []
-                            self.mic.drain()  # drop any frames captured during TTS playback
                             silence_ms_accum = 0
                             preroll_frames.clear()
                             utterance_ms = 0
@@ -588,14 +651,18 @@ class DialogManager:
                     if self.save_transcript_audio:
                         self._save_audio_debug(pcm_for_asr, SAMPLE_RATE, transcript=text)
 
-                    reply = self.policy(text)
-                    if len(reply) > 0:
-                        self.speak(reply) # Sets state to SPEAKING inside
+                    if self.external_policy:
+                        self._set_state(self.THINKING)
+                        self._start_external_policy(text)
                     else:
-                        if session_active:
-                            self._set_state(self.LISTENING)
-                        else:
-                            self._set_state(self.IDLE)
+                        # reply = self.policy(text)
+                        # if len(reply) > 0:
+                        #     self.speak(reply) # Sets state to SPEAKING inside
+                        # else:
+                            if session_active:
+                                self._set_state(self.LISTENING)
+                            else:
+                                self._set_state(self.IDLE)
                         
                     utterance_frames = []
                     silence_ms_accum = 0
@@ -655,7 +722,7 @@ class DialogManager:
 
 
                 # --- session-wide inactivity timeout (works even if user never spoke) ---
-                if session_active and self.state != self.SPEAKING:
+                if session_active and self.state not in (self.SPEAKING, self.THINKING):
                     now_ms = int(time.time() * 1000.0)
                     if (now_ms - last_activity_ms) >= LISTEN_NO_SPEECH_TIMEOUT_MS:
                         print("[System] Inactivity timeout.")
@@ -686,10 +753,18 @@ def main():
     def _on_status(status: str):
         status_q.put(status)
 
+    def _my_policy(user_text: str) -> str:
+        # do API/LLM call here, blocking is fine
+        time.sleep(1.0)  # simulate thinking time
+        # return f"You said: {user_text}"
+        return ""
+
     dm = DialogManager(
         model=WHISPER_MODEL,
+        device="auto",
         on_transcript=_on_transcript,
         on_status=_on_status,
+        external_policy=_my_policy,
         wakeword_keywords="hey_jarvis",
         wakeword_model_paths= None,
         vad_silero_threshold = 0.5

@@ -81,7 +81,7 @@ class TTSPlayer:
         self._stream.start()
 
     def stop(self):
-        print("[TTSPlayer] Stopping playback...")
+        # print("[TTSPlayer] Stopping playback...")
         self._stop.set()
         self._playing.clear()
 
