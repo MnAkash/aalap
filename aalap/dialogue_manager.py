@@ -111,7 +111,7 @@ class AudioCapture:
 
         if device is None:
             default_in, default_out = sd.default.device
-            print(f"[Info] USing default input index: {default_in}, output index: {default_out}")
+            print(f"[Info] Using default input index: {default_in}, output index: {default_out}")
         else:
             print(f"[Info] Using input device index: {device}")
 
@@ -329,7 +329,7 @@ class DialogManager:
             
         """
         self.state = self.IDLE
-        self.package_dir         = Path(__file__).resolve().parent
+        self.package_dir         = Path(__file__).resolve().parent.parent
         self.piper_model_path    = str(self.package_dir / "resources" / "models" / "en_US-amy-medium.onnx")
 
         self.asr        = StreamingASR(model=model, device="auto", compute_type="auto")
@@ -511,7 +511,10 @@ class DialogManager:
                         break
                     frame = self.mic.read_frame()
                     self.vad.is_speech(frame)
-            print(f"[System] Ready: say the wake word {self.ww.labels} or call trigger_wakeword().")
+            if self.ww.labels:
+                print(f"[System] Ready: say the wake word {self.ww.labels} or call trigger_wakeword().")
+            else:
+                print(f"[System] Ready: Wakeword disabled. Call trigger_wakeword() to start listening.")
             while not self._stop_event.is_set():
                 cap = self.mic.read_frame()  # int16
                 clean = cap  # raw audio, no AEC

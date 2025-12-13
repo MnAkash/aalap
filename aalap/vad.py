@@ -65,12 +65,13 @@ class VAD:
             import torch
 
             self._torch = torch
-            print("[VAD] Loading Silero VAD model...")
+            # print("[VAD] Loading Silero VAD model...")
             self._silero_model, utils = torch.hub.load(
                 repo_or_dir="snakers4/silero-vad",
                 model="silero_vad",
                 force_reload=False,
                 trust_repo=True,
+                verbose=False,
             )
             (self._silero_get_speech_timestamps, _, _, _, _) = utils
             self._silero_model.to(self._device)
