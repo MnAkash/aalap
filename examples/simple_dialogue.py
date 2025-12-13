@@ -15,10 +15,17 @@ def main():
     def _on_status(status: str):
         status_q.put(status)
 
+    def _my_policy(user_text: str) -> str:
+        # do API/LLM call here, blocking is fine
+        time.sleep(1.0)  # simulate thinking time
+        return f"You said: {user_text}"
+
     dm = DialogManager(
         model="base.en",
+        device="auto",
         on_transcript=_on_transcript,
         on_status=_on_status,
+        external_policy=_my_policy,
         wakeword_keywords="hey_jarvis",
         wakeword_model_paths=None,
         vad_silero_threshold=0.5,
