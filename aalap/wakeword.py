@@ -26,7 +26,7 @@ class WakeWord:
         frame_ms: int = 20,
         window_ms: int = 500,
         ema_alpha: float = 0.30,
-        arm_thresh: float = 0.001,
+        arm_thresh: float = 0.05,
         disarm_thresh: float = 0.01,
         non_overlap: bool = True,
     ):

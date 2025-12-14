@@ -60,15 +60,15 @@ SAVE_TRANSCRIPT_AUDIO       = False
 TRANSCRIPT_AUDIO_DIR        = "debug_transcripts" # When SAVE_TRANSCRIPT_AUDIO = True save all transcribed audio to this dir
 PRE_SPEECH_FRAMES           = max(0, PRE_SPEECH_MS // CAPTURE_FRAME_MS)
 VAD_CALIBRATION_FRAMES      = 20  # 20*CAPTURE_FRAME_MS = 400 ms to calibrate VAD noise floor
-POST_TTS_MUTE_MS            = 400  # ignore VAD for this many ms after TTS to avoid self-trigger
+POST_TTS_MUTE_MS            = 500  # ignore VAD for this many ms after TTS to avoid self-trigger
+SPEAK_START_GRACE_MS        = 150  # wait after starting TTS before checking playback end
 
 
 # Wake word
-USE_WAKEWORD = True
 WAKEWORD_KEYWORDS = "hey_jarvis"
 WAKEWORD_WINDOW_MS = 500
 WAKEWORD_EMA_ALPHA     = 0.30   # smoothing, 0..1
-WAKEWORD_ARM_THRESH    = 0.001   # cross up -> fire
+WAKEWORD_ARM_THRESH    = 0.05   # cross up -> fire
 WAKEWORD_DISARM_THRESH = 0.01   # cross down -> re-arm
 # set this True to evaluate once per window (no overlapping windows)
 WAKEWORD_NON_OVERLAP   = True
@@ -364,8 +364,17 @@ class DialogManager:
                             silero_window_ms=vad_silero_window_ms,
                             silero_min_speech_ms=vad_silero_min_speech_ms,
                             silero_min_silence_ms=vad_silero_min_silence_ms,
-                        )
-        self.ww         = WakeWord(wakeword_keywords, wakeword_model_paths=wakeword_model_paths)
+                            )
+        self.ww         = WakeWord(wakeword_keywords,
+                                   wakeword_model_paths=wakeword_model_paths,
+                                   sample_rate=SAMPLE_RATE,
+                                   frame_ms=CAPTURE_FRAME_MS,
+                                   window_ms=WAKEWORD_WINDOW_MS,
+                                   ema_alpha=WAKEWORD_EMA_ALPHA,
+                                   arm_thresh=WAKEWORD_ARM_THRESH,
+                                   disarm_thresh=WAKEWORD_DISARM_THRESH,
+                                   non_overlap=WAKEWORD_NON_OVERLAP,
+                                )
         self.mic        = AudioCapture(device=mic_index)
 
         self.save_transcript_audio = save_transcript_audio
@@ -379,8 +388,12 @@ class DialogManager:
         self._policy_result_q: queue.Queue[str] = queue.Queue(maxsize=1)
         self._stop_event = threading.Event()
         self._deactivate_event = threading.Event()
-        self._post_tts_mute_ms = 0.0
+        self._post_tts_mute_until = 0.0
         self._post_tts_mute_window = post_tts_mute
+        self._post_tts_waiting = False
+        self._speak_pending = False
+        self._speak_started_ms = 0.0
+        self._speak_start_grace_ms = SPEAK_START_GRACE_MS
         self._thread: Optional[threading.Thread] = None
         self._last_status = None
         self._emit_status(self.state)
@@ -439,13 +452,15 @@ class DialogManager:
         self._deactivate_event.set()
 
     def speak(self, text: str):
-        self._set_state(self.SPEAKING, poststring=f"({text})")
-        self.tts_player.stop()
-        # print(f"[Robot]: {text}")
-        # def _run():
+        # reset any previous post-TTS mute state
+        self._post_tts_waiting = False
+        self._post_tts_mute_until = 0.0
+        self._speak_pending = True
         pcm = self.tts_engine.synth(text)
         self.tts_player.play(pcm)
-        # threading.Thread(target=_run, daemon=True).start()
+        self._speak_started_ms = time.time() * 1000.0
+        self._speak_pending = False
+        self._set_state(self.SPEAKING, poststring=f"({text})")
 
 
     def policy(self, user_text: str) -> str:
@@ -613,20 +628,36 @@ class DialogManager:
                 if self.state == self.SPEAKING:
                     last_activity_ms = int(time.time() * 1000.0)
 
+                    # allow play() / audio callback to spin up before checking status
+                    if self._speak_pending:
+                        time.sleep(0.001)
+                        continue
+                    if self._speak_started_ms and (last_activity_ms - self._speak_started_ms) < self._speak_start_grace_ms:
+                        time.sleep(0.001)
+                        continue
+
                     # If playback finished
                     if not self.tts_player.is_playing():
-                        # return to LISTENING if session is active, else idle
-                        if session_active:
-                            self.mic.drain()  # drop any frames captured during TTS playback
-                            self._set_state(self.LISTENING)
-                            self._post_tts_mute_ms = time.time() * 1000.0 + self._post_tts_mute_window
-                            utterance_frames = []
-                            silence_ms_accum = 0
-                            preroll_frames.clear()
-                            utterance_ms = 0
-                            had_any_speech = False
-                        else:
-                            self._set_state(self.IDLE)
+                        if not self._post_tts_waiting:
+                            # print(f"[System] TTS playback finished.")
+                            self._speak_started_ms = 0.0
+                            self._post_tts_mute_until = last_activity_ms + self._post_tts_mute_window
+                            self._post_tts_waiting = True
+                            self.mic.drain()
+                        elif last_activity_ms >= self._post_tts_mute_until:
+                            self._post_tts_waiting = False
+                            self._post_tts_mute_until = 0.0
+                            # return to LISTENING if session is active, else idle
+                            if session_active:
+                                self.mic.drain()  # drop any frames captured during TTS playback
+                                self._set_state(self.LISTENING)
+                                utterance_frames = []
+                                silence_ms_accum = 0
+                                preroll_frames.clear()
+                                utterance_ms = 0
+                                had_any_speech = False
+                            else:
+                                self._set_state(self.IDLE)
 
                     continue
 
@@ -704,7 +735,7 @@ class DialogManager:
                 # ======================== LISTENING / RECORDING mode ======================
                 if self.state in (self.LISTENING, self.RECORDING):
                     now_ms = int(time.time() * 1000.0)
-                    if now_ms < self._post_tts_mute_ms:
+                    if now_ms < self._post_tts_mute_until:
                         # still in post-TTS mute window: drain and skip VAD
                         self.mic.drain()
                         time.sleep(0.001)
