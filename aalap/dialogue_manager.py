@@ -9,6 +9,8 @@ Core pieces:
 - Optional transcript saving and a simple policy hook for responses.
 
 Usable as a CLI entry point (`aalap`) or as a library component.
+
+Author: Moniruzzaman Akash
 """
 
 import os, time, threading, queue, sys, subprocess, shutil
@@ -697,7 +699,7 @@ class DialogManager:
                 if self.state == self.TRANSCRIBING:
                     total_ms = utterance_ms  # fallback in case safety cap forced endpoint
                     pcm_for_asr = np.concatenate(utterance_frames) if utterance_frames else np.array([], dtype=np.int16)
-                    print(f"[Voice] Transcribing… ({total_ms} ms)")
+                    # print(f"[Voice] Transcribing… ({total_ms} ms)")
                     text = self.asr.transcribe_blocking(pcm_for_asr, timeout_s=5.0)  # isolated in a worker
                     print(f"[User]: {text}")
                     try:
@@ -773,7 +775,7 @@ class DialogManager:
                                     self.vad.reset()
                                     self.mic.drain()
                                 else:
-                                    self._set_state(self.TRANSCRIBING)
+                                    self._set_state(self.TRANSCRIBING, poststring=f"({utterance_ms}ms)")
                         else:
                             # build a small pre-roll before first VAD hit
                             if PRE_SPEECH_FRAMES > 0:
@@ -782,7 +784,7 @@ class DialogManager:
                     
                     # Force endpoint if user keeps talking forever (safety cap)
                     if self.state in (self.LISTENING, self.RECORDING) and utterance_ms >= MAX_LISTEN_MS and had_any_speech:
-                        self._set_state(self.TRANSCRIBING)
+                        self._set_state(self.TRANSCRIBING, poststring=f"({utterance_ms}ms)")
 
 
                 # --- session-wide inactivity timeout (works even if user never spoke) ---
