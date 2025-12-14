@@ -373,6 +373,7 @@ class DialogManager:
         self._policy_thread: Optional[threading.Thread] = None
         self._policy_result_q: queue.Queue[str] = queue.Queue(maxsize=1)
         self._stop_event = threading.Event()
+        self._deactivate_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._last_status = None
         self._emit_status(self.state)
@@ -425,6 +426,10 @@ class DialogManager:
         """Programmatically trigger listening. """
         try: self.system_trigger_q.put_nowait(True)
         except queue.Full: pass
+
+    def deactivate_wakeword_session(self):
+        """Force the current wakeword-driven session back to IDLE."""
+        self._deactivate_event.set()
 
     def speak(self, text: str):
         self._set_state(self.SPEAKING, poststring=f"({text})")
@@ -558,6 +563,20 @@ class DialogManager:
                 cap = self.mic.read_frame()  # int16
                 clean = cap  # raw audio, no AEC
                 clean_f32 = to_float32(clean)
+
+                # external deactivate -> drop to IDLE and clear buffers
+                if self._deactivate_event.is_set():
+                    session_active = False
+                    self._set_state(self.IDLE)
+                    utterance_frames = []
+                    silence_ms_accum = 0
+                    preroll_frames.clear()
+                    utterance_ms = 0
+                    had_any_speech = False
+                    self.vad.reset()
+                    self.mic.drain()
+                    self._deactivate_event.clear()
+                    continue
 
                 # ========================= THINKING mode =========================
                 if self.state == self.THINKING:
