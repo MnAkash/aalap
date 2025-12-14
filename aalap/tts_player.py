@@ -83,7 +83,15 @@ class TTSPlayer:
     def stop(self):
         # print("[TTSPlayer] Stopping playback...")
         self._stop.set()
+        try:
+            while True:
+                self._q.get_nowait()
+        except queue.Empty:
+            pass
+        self._frames_left = 0
+        self._silence_runs = 0
         self._playing.clear()
+        self._stop.clear()
 
     def play(self, pcm16: np.ndarray):
         """
