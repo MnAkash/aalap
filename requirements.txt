@@ -6,4 +6,4 @@ piper-tts
 onnxruntime<2,>=1.20.1
 torch>=2.0,<3.0
 torchaudio>=2.0,<3.0
-openwakeword
+openwakeword==0.5.0

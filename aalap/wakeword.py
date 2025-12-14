@@ -65,7 +65,7 @@ class WakeWord:
                     wakeword_model_paths = list(wakeword_model_paths) if wakeword_model_paths is not None else []
                 except TypeError:
                     wakeword_model_paths = []
-            self.model = OWWModel(wakeword_model_paths=wakeword_model_paths)
+            self.model = OWWModel(wakeword_models=wakeword_model_paths)
 
     def _predict_score(self, window_i16: np.ndarray) -> float:
         preds = self.model.predict(window_i16) or {}
