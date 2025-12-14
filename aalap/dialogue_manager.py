@@ -60,6 +60,7 @@ SAVE_TRANSCRIPT_AUDIO       = False
 TRANSCRIPT_AUDIO_DIR        = "debug_transcripts" # When SAVE_TRANSCRIPT_AUDIO = True save all transcribed audio to this dir
 PRE_SPEECH_FRAMES           = max(0, PRE_SPEECH_MS // CAPTURE_FRAME_MS)
 VAD_CALIBRATION_FRAMES      = 20  # 20*CAPTURE_FRAME_MS = 400 ms to calibrate VAD noise floor
+POST_TTS_MUTE_MS            = 400  # ignore VAD for this many ms after TTS to avoid self-trigger
 
 
 # Wake word
@@ -273,6 +274,7 @@ class DialogManager:
                  mic_index: int = None,
                  speaker_index: int = None,
                  silence_ms_after_speech=SILENCE_MS_AFTER_SPEECH,
+                 post_tts_mute: int = POST_TTS_MUTE_MS,
                  wakeword_keywords: Union[str, List[str]] = WAKEWORD_KEYWORDS, # set to None to disable, default is "hey_jarvis"
                  wakeword_model_paths: Optional[Union[str, List[str]]] = None,
                  vad_aggressiveness=WEBRTC_AGGRESSIVENESS,
@@ -306,6 +308,9 @@ class DialogManager:
 
             silence_ms_after_speech (int): How many ms of silence after speech to
                     consider the utterance ended.
+            
+            post_tts_mute (int): Milliseconds to ignore VAD after TTS playback ends.
+                    This will help avoid immediate re-trigger from residual playback audio.
 
             wakeword_keywords (Union[str, List[str]], optional): Wake word(s) (string or list of srtings) 
                     keywords to listen for. If None or empty list, wake word detection is disabled.
@@ -374,6 +379,8 @@ class DialogManager:
         self._policy_result_q: queue.Queue[str] = queue.Queue(maxsize=1)
         self._stop_event = threading.Event()
         self._deactivate_event = threading.Event()
+        self._post_tts_mute_ms = 0.0
+        self._post_tts_mute_window = post_tts_mute
         self._thread: Optional[threading.Thread] = None
         self._last_status = None
         self._emit_status(self.state)
@@ -612,6 +619,7 @@ class DialogManager:
                         if session_active:
                             self.mic.drain()  # drop any frames captured during TTS playback
                             self._set_state(self.LISTENING)
+                            self._post_tts_mute_ms = time.time() * 1000.0 + self._post_tts_mute_window
                             utterance_frames = []
                             silence_ms_accum = 0
                             preroll_frames.clear()
@@ -695,6 +703,12 @@ class DialogManager:
 
                 # ======================== LISTENING / RECORDING mode ======================
                 if self.state in (self.LISTENING, self.RECORDING):
+                    now_ms = int(time.time() * 1000.0)
+                    if now_ms < self._post_tts_mute_ms:
+                        # still in post-TTS mute window: drain and skip VAD
+                        self.mic.drain()
+                        time.sleep(0.001)
+                        continue
                     
                     if self.vad.is_speech(clean):
                         if not had_any_speech and preroll_frames:
