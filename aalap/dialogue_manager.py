@@ -404,6 +404,8 @@ class DialogManager:
         self._speak_pending = False
         self._speak_started_ms = 0.0
         self._speak_start_grace_ms = SPEAK_START_GRACE_MS
+        self._last_activity_ms = 0.0
+        self._refresh_activity_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._last_status = None
         self._emit_status(self.state)
@@ -456,6 +458,7 @@ class DialogManager:
         """Programmatically trigger listening. """
         try: self.system_trigger_q.put_nowait(True)
         except queue.Full: pass
+        self._refresh_activity_event.set()
 
     def deactivate_wakeword_session(self):
         """Force the current wakeword-driven session back to IDLE."""
@@ -576,7 +579,7 @@ class DialogManager:
         had_any_speech = False
 
         session_active = False
-        last_activity_ms = 0  # updated on every user-speech VAD=true
+        self._last_activity_ms = 0  # updated on every user-speech VAD=true
 
         try:
             # calibrate VAD noise floor if "webrtcVAD" backend in use
@@ -595,6 +598,10 @@ class DialogManager:
                 cap = self.mic.read_frame()  # int16
                 clean = cap  # raw audio, no AEC
                 clean_f32 = to_float32(clean)
+
+                if self._refresh_activity_event.is_set():
+                    self._last_activity_ms = int(time.time() * 1000.0)
+                    self._refresh_activity_event.clear()
 
                 # external deactivate -> drop to IDLE and clear buffers
                 if self._deactivate_event.is_set():
@@ -630,19 +637,19 @@ class DialogManager:
                         utterance_frames = []
                         utterance_ms = 0
                         had_any_speech = False
-                        last_activity_ms = int(time.time() * 1000.0)
+                        self._last_activity_ms = int(time.time() * 1000.0)
                     time.sleep(0.001)
                     continue
 
                 # ========================= SPEAKING mode =========================
                 if self.state == self.SPEAKING:
-                    last_activity_ms = int(time.time() * 1000.0)
+                    self._last_activity_ms = int(time.time() * 1000.0)
 
                     # allow play() / audio callback to spin up before checking status
                     if self._speak_pending:
                         time.sleep(0.001)
                         continue
-                    if self._speak_started_ms and (last_activity_ms - self._speak_started_ms) < self._speak_start_grace_ms:
+                    if self._speak_started_ms and (self._last_activity_ms - self._speak_started_ms) < self._speak_start_grace_ms:
                         time.sleep(0.001)
                         continue
 
@@ -651,10 +658,10 @@ class DialogManager:
                         if not self._post_tts_waiting:
                             # logger.info("TTS playback finished.")
                             self._speak_started_ms = 0.0
-                            self._post_tts_mute_until = last_activity_ms + self._post_tts_mute_window
+                            self._post_tts_mute_until = self._last_activity_ms + self._post_tts_mute_window
                             self._post_tts_waiting = True
                             self.mic.drain()
-                        elif last_activity_ms >= self._post_tts_mute_until:
+                        elif self._last_activity_ms >= self._post_tts_mute_until:
                             self._post_tts_waiting = False
                             self._post_tts_mute_until = 0.0
                             # return to LISTENING if session is active, else idle
@@ -699,7 +706,7 @@ class DialogManager:
                         preroll_frames.clear()
                         utterance_ms = 0
                         had_any_speech = False
-                        last_activity_ms = int(time.time() * 1000.0)
+                        self._last_activity_ms = int(time.time() * 1000.0)
                         continue
 
 
@@ -715,7 +722,7 @@ class DialogManager:
                             self.on_transcript(text)
                     except Exception as e:
                         logger.error(f"[TranscriptCallback] Error: {e}")
-                    last_activity_ms = int(time.time() * 1000.0)
+                    self._last_activity_ms = int(time.time() * 1000.0)
                     if self.save_transcript_audio:
                         self._save_audio_debug(pcm_for_asr, SAMPLE_RATE, transcript=text)
 
@@ -759,7 +766,7 @@ class DialogManager:
                         utterance_ms += CAPTURE_FRAME_MS
 
                         silence_ms_accum = 0
-                        last_activity_ms = int(time.time() * 1000.0)
+                        self._last_activity_ms = int(time.time() * 1000.0)
 
                         if not had_any_speech:
                             had_any_speech = True
@@ -798,7 +805,7 @@ class DialogManager:
                 # --- session-wide inactivity timeout (works even if user never spoke) ---
                 if session_active and self.state not in (self.SPEAKING, self.THINKING):
                     now_ms = int(time.time() * 1000.0)
-                    if (now_ms - last_activity_ms) >= LISTEN_NO_SPEECH_TIMEOUT_MS:
+                    if (now_ms - self._last_activity_ms) >= LISTEN_NO_SPEECH_TIMEOUT_MS:
                         logger.info("[System] Inactivity timeout.")
                         session_active = False
                         self._set_state(self.IDLE)
