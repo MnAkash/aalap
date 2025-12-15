@@ -284,6 +284,7 @@ class DialogManager:
                  mic_index: int = None,
                  speaker_index: int = None,
                  silence_ms_after_speech=SILENCE_MS_AFTER_SPEECH,
+                 no_speech_timeout: int = LISTEN_NO_SPEECH_TIMEOUT_MS,
                  post_tts_mute: int = POST_TTS_MUTE_MS,
                  wakeword_keywords: Union[str, List[str]] = WAKEWORD_KEYWORDS, # set to None to disable, default is "hey_jarvis"
                  wakeword_model_paths: Optional[Union[str, List[str]]] = None,
@@ -318,6 +319,9 @@ class DialogManager:
 
             silence_ms_after_speech (int): How many ms of silence after speech to
                     consider the utterance ended.
+
+            no_speech_timeout (int): Milliseconds of inactivity (no VAD speech)
+                    before the session returns to IDLE while listening.
             
             post_tts_mute (int): Milliseconds to ignore VAD after TTS playback ends.
                     This will help avoid immediate re-trigger from residual playback audio.
@@ -391,6 +395,7 @@ class DialogManager:
         self.transcript_audio_dir = transcript_audio_dir
         self.system_trigger_q = queue.Queue(maxsize=1)
         self.silence_ms_after_speech = silence_ms_after_speech  # endpoint hangover
+        self.no_speech_timeout = no_speech_timeout
         self.on_transcript = on_transcript
         self.on_status = on_status
         self.external_policy = external_policy
@@ -805,7 +810,7 @@ class DialogManager:
                 # --- session-wide inactivity timeout (works even if user never spoke) ---
                 if session_active and self.state not in (self.SPEAKING, self.THINKING):
                     now_ms = int(time.time() * 1000.0)
-                    if (now_ms - self._last_activity_ms) >= LISTEN_NO_SPEECH_TIMEOUT_MS:
+                    if (now_ms - self._last_activity_ms) >= self.no_speech_timeout:
                         logger.info("[System] Inactivity timeout.")
                         session_active = False
                         self._set_state(self.IDLE)
