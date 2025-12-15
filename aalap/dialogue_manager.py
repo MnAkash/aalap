@@ -13,7 +13,7 @@ Usable as a CLI entry point (`aalap`) or as a library component.
 Author: Moniruzzaman Akash
 """
 
-import os, time, threading, queue, sys, subprocess, shutil
+import os, time, threading, queue, sys, subprocess, shutil, logging
 import multiprocessing as mp
 from collections import deque
 from pathlib import Path
@@ -42,6 +42,14 @@ except ImportError:
     from wakeword import WakeWord  # type: ignore
     from tts_piper import PiperTTS  # type: ignore
     from tts_player import TTSPlayer  # type: ignore
+
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+logger = logging.getLogger(__name__)
 
 
 
@@ -114,9 +122,9 @@ class AudioCapture:
 
         if device is None:
             default_in, default_out = sd.default.device
-            print(f"[Info] Using default input index: {default_in}, output index: {default_out}")
+            logger.info(f"Using default input index: {default_in}, output index: {default_out}")
         else:
-            print(f"[Info] Using input device index: {device}")
+            logger.info(f"Using input device index: {device}")
 
     def _cb(self, indata, frames, time_info, status):
         # Keep the callback *tiny* — no allocations, no blocking.
@@ -146,9 +154,9 @@ class AudioCapture:
         try:
             devs = sd.query_devices()
             for i, d in enumerate(devs):
-                print(f"[{i:2d}] {d['name']}  (in:{d['max_input_channels']}, out:{d['max_output_channels']})")
+                logger.info(f"[{i:2d}] {d['name']}  (in:{d['max_input_channels']}, out:{d['max_output_channels']})")
         except Exception as e:
-            print(f"[WARN] Could not query audio devices: {e}")
+            logger.warning(f"Could not query audio devices: {e}")
 
     def start(self):
 
@@ -404,12 +412,12 @@ class DialogManager:
         if status == self._last_status:
             return
         self._last_status = status
-        print(f"[Status]: {status} {poststring}")
+        logger.info(f"[Status]: {status} {poststring}")
         if self.on_status:
             try:
                 self.on_status(status)
             except Exception as e:
-                print(f"[StatusCallback] Error: {e}")
+                logger.error(f"[StatusCallback] Error: {e}")
 
     def _set_state(self, new_state: str, poststring: str = ""):
         if self.state != new_state:
@@ -490,7 +498,7 @@ class DialogManager:
             try:
                 result = self.external_policy(user_text) if self.external_policy else ""
             except Exception as e:
-                print(f"[Policy] Error: {e}")
+                logger.error(f"[Policy] Error: {e}")
                 result = ""
             try:
                 self._policy_result_q.put_nowait(result or "")
@@ -509,12 +517,12 @@ class DialogManager:
         if pcm16.size == 0:
             return
         if not shutil.which("ffmpeg"):
-            print("[DebugAudio] ffmpeg not found; skipping save.")
+            logger.info("[DebugAudio] ffmpeg not found; skipping save.")
             return
         try:
             os.makedirs(self.transcript_audio_dir, exist_ok=True)
         except Exception as e:
-            print(f"[DebugAudio] Could not create dir {self.transcript_audio_dir}: {e}")
+            logger.warning(f"[DebugAudio] Could not create dir {self.transcript_audio_dir}: {e}")
             return
 
         ts = time.strftime("%Y%m%d-%H%M%S")
@@ -548,13 +556,13 @@ class DialogManager:
                 stderr=subprocess.DEVNULL,
             )
             if proc.returncode != 0:
-                print(f"[DebugAudio] ffmpeg encode failed (code {proc.returncode}).")
+                logger.error(f"[DebugAudio] ffmpeg encode failed (code {proc.returncode}).")
             else:
-                print(f"[DebugAudio] Saved utterance to {out_path}")
+                logger.info(f"[DebugAudio] Saved utterance to {out_path}")
         except FileNotFoundError:
-            print("[DebugAudio] ffmpeg not found when attempting to save.")
+            logger.info("[DebugAudio] ffmpeg not found when attempting to save.")
         except Exception as e:
-            print(f"[DebugAudio] Failed to save audio: {e}")
+            logger.error(f"[DebugAudio] Failed to save audio: {e}")
 
     def _run_loop(self):
         self.mic.start()
@@ -573,16 +581,16 @@ class DialogManager:
         try:
             # calibrate VAD noise floor if "webrtcVAD" backend in use
             if VAD_BACKEND == "webrtc":
-                print("[VAD] Calibrating noise floor, please be silent...")
+                logger.info("[VAD] Calibrating noise floor, please be silent...")
                 for _ in range(VAD_CALIBRATION_FRAMES):
                     if self._stop_event.is_set():
                         break
                     frame = self.mic.read_frame()
                     self.vad.is_speech(frame)
             if self.ww.labels:
-                print(f"[System] Ready: say the wake word {self.ww.labels} or call trigger_wakeword().")
+                logger.info(f"[System] Ready: Say the wake word {self.ww.labels} or call trigger_wakeword().")
             else:
-                print(f"[System] Ready: Wakeword disabled. Call trigger_wakeword() to start listening.")
+                logger.info("[System] Ready: Wakeword disabled. Call trigger_wakeword() to start listening.")
             while not self._stop_event.is_set():
                 cap = self.mic.read_frame()  # int16
                 clean = cap  # raw audio, no AEC
@@ -641,7 +649,7 @@ class DialogManager:
                     # If playback finished
                     if not self.tts_player.is_playing():
                         if not self._post_tts_waiting:
-                            # print(f"[System] TTS playback finished.")
+                            # logger.info("TTS playback finished.")
                             self._speak_started_ms = 0.0
                             self._post_tts_mute_until = last_activity_ms + self._post_tts_mute_window
                             self._post_tts_waiting = True
@@ -682,7 +690,7 @@ class DialogManager:
                         ww_hit = fired
 
                     if ww_hit or forced:
-                        print(f"\n[System] Triggered by {'wake word' if ww_hit else 'system'}")
+                        logger.info(f"Triggered by {'wake word' if ww_hit else 'system'}")
                         session_active = True
                         self._set_state(self.LISTENING)
                         utterance_frames = []
@@ -701,12 +709,12 @@ class DialogManager:
                     pcm_for_asr = np.concatenate(utterance_frames) if utterance_frames else np.array([], dtype=np.int16)
                     # print(f"[Voice] Transcribing… ({total_ms} ms)")
                     text = self.asr.transcribe_blocking(pcm_for_asr, timeout_s=5.0)  # isolated in a worker
-                    print(f"[User]: {text}")
+                    logger.info(f"[User]: {text}")
                     try:
                         if self.on_transcript:
                             self.on_transcript(text)
                     except Exception as e:
-                        print(f"[TranscriptCallback] Error: {e}")
+                        logger.error(f"[TranscriptCallback] Error: {e}")
                     last_activity_ms = int(time.time() * 1000.0)
                     if self.save_transcript_audio:
                         self._save_audio_debug(pcm_for_asr, SAMPLE_RATE, transcript=text)
@@ -791,7 +799,7 @@ class DialogManager:
                 if session_active and self.state not in (self.SPEAKING, self.THINKING):
                     now_ms = int(time.time() * 1000.0)
                     if (now_ms - last_activity_ms) >= LISTEN_NO_SPEECH_TIMEOUT_MS:
-                        print("[System] Inactivity timeout.")
+                        logger.info("[System] Inactivity timeout.")
                         session_active = False
                         self._set_state(self.IDLE)
                         utterance_frames = []
