@@ -1,17 +1,90 @@
+import os
+import hashlib
+import urllib.request
+from tqdm import tqdm
+from pathlib import Path
 import numpy as np
 from piper.config import SynthesisConfig
 from piper.voice import PiperVoice
 
+PIPER_BASE_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0"
+
+
+def _download_file(url: str, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    with urllib.request.urlopen(url) as r, tmp.open("wb") as f:
+        total = int(r.headers.get("content-length", 0))
+        bar = tqdm(total=total, unit="iB", unit_scale=True, desc=dest.name) if total else None
+        while True:
+            chunk = r.read(8192)
+            if not chunk:
+                break
+            f.write(chunk)
+            if bar:
+                bar.update(len(chunk))
+        if bar:
+            bar.close()
+    tmp.replace(dest)
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def download_piper_voice(language: str, voice: str, quality: str, cache_dir: Path | str | None = None,
+                         expected_sha256: str | None = None) -> tuple[Path, Path]:
+    """
+    Download a Piper voice model (.onnx) and its config (.onnx.json) to a cache.
+    Returns (model_path, config_path).
+    """
+    cache = Path(cache_dir) if cache_dir is not None else Path(os.path.expanduser("~/.cache/aalap/piper"))
+    model_name = f"{language}-{voice}-{quality}"
+    base = f"{PIPER_BASE_URL}/{language.split('_')[0]}/{language}/{voice}/{quality}/{model_name}"
+    model_url = f"{base}.onnx"
+    config_url = f"{base}.onnx.json"
+
+    model_path = cache / f"{model_name}.onnx"
+    config_path = cache / f"{model_name}.onnx.json"
+
+    if not model_path.exists():
+        _download_file(model_url, model_path)
+    if expected_sha256:
+        digest = _sha256(model_path)
+        if digest.lower() != expected_sha256.lower():
+            raise ValueError(f"SHA256 mismatch for {model_path}: {digest} != {expected_sha256}")
+    if not config_path.exists():
+        _download_file(config_url, config_path)
+    return model_path, config_path
+
 
 class PiperTTS:
-    def __init__(self, model_path: str, length=1.0, noise=0.667, noise_w=0.8):
-        self.model_path = model_path
+    def __init__(
+        self,
+        language: str = "en_US",
+        voice: str = "amy",
+        quality: str = "medium",
+        length: float = 1.0,
+        noise: float = 0.667,
+        noise_w: float = 0.8,
+        cache_dir: Path | str | None = None,
+    ):
+        self.language = language
+        self.voice_name = voice
+        self.quality = quality
         self.length = length
         self.noise = noise
         self.noise_w = noise_w
+        self.cache_dir = cache_dir
 
-        cfg = self.model_path + ".json" if self.model_path.endswith(".onnx") else None
-        self.voice = PiperVoice.load(self.model_path, config_path=cfg)
+        model_path, cfg_path = download_piper_voice(language, voice, quality, cache_dir=cache_dir)
+        self.model_path = str(model_path)
+        self.config_path = str(cfg_path)
+        self.voice = PiperVoice.load(self.model_path, config_path=self.config_path)
 
     def linear_resample_int16(self, x: np.ndarray, sr_in: int, sr_out: int) -> np.ndarray:
         """Simple linear resampler to avoid extra deps. Mono int16 in -> int16 out."""

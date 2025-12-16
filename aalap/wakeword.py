@@ -108,7 +108,7 @@ class WakeWord:
             elif not wakeword_model_paths:
                 raise ValueError("Custom wakeword specified but no model path provided. Please supply wakeword_model_paths.")
 
-            print("Using wakeowrd path: ", wakeword_model_paths)
+            # print("Using wakeowrd path: ", wakeword_model_paths)
             self.model = OWWModel(wakeword_models=wakeword_model_paths,
                                   inference_framework='onnx',
                                   melspec_model_path = melspec_model_path,

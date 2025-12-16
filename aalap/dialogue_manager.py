@@ -101,6 +101,9 @@ WHISPER_DEVICE  = "auto"  # "cuda" if GPU available
 WHISPER_COMPUTE = "auto"
 
 # Piper config
+PIPER_LANGUAGE      = "en_US"
+PIPER_VOICE         = "amy"
+PIPER_QUALITY       = "medium"
 PIPER_LENGTH_SCALE  = 1.0  # >1 slower/deeper; <1 faster
 PIPER_NOISE_SCALE   = 0.667
 PIPER_NOISE_W       = 0.8
@@ -286,6 +289,9 @@ class DialogManager:
                  silence_ms_after_speech=SILENCE_MS_AFTER_SPEECH,
                  no_speech_timeout: int = LISTEN_NO_SPEECH_TIMEOUT_MS,
                  post_tts_mute: int = POST_TTS_MUTE_MS,
+                 piper_language: str = PIPER_LANGUAGE,
+                 piper_voice: str = PIPER_VOICE,
+                 piper_quality: str = PIPER_QUALITY,
                  wakeword_keywords: Union[str, List[str]] = WAKEWORD_KEYWORDS, # set to None to disable, default is "hey_jarvis"
                  wakeword_model_paths: Optional[Union[str, List[str]]] = None,
                  vad_aggressiveness=WEBRTC_AGGRESSIVENESS,
@@ -326,6 +332,13 @@ class DialogManager:
             post_tts_mute (int): Milliseconds to ignore VAD after TTS playback ends.
                     This will help avoid immediate re-trigger from residual playback audio.
 
+            piper_language (str): Piper language/region code for TTS (e.g., "en_US").
+                    Find more on this link: https://rhasspy.github.io/piper-samples/
+
+            piper_voice (str): Piper voice name to use (e.g., "amy").
+
+            piper_quality (str): Piper model quality level (e.g., "medium", "low", "high").
+
             wakeword_keywords (Union[str, List[str]], optional): Wake word(s) (string or list of srtings) 
                     keywords to listen for. If None or empty list, wake word detection is disabled.
                     Default is "hey_jarvis". Options include "hey_jarvis", "alexa".
@@ -364,12 +377,17 @@ class DialogManager:
             
         """
         self.state = self.IDLE
-        self.package_dir         = Path(__file__).resolve().parent.parent
-        self.piper_model_path    = str(self.package_dir / "resources" / "models" / "en_US-amy-medium.onnx")
-
+        # self.package_dir         = Path(__file__).resolve().parent.parent
         self.asr        = StreamingASR(model=model, device=device, compute_type="auto")
-        self.tts_engine = PiperTTS(self.piper_model_path, PIPER_LENGTH_SCALE, PIPER_NOISE_SCALE, PIPER_NOISE_W)
-        self.tts_player = TTSPlayer(device=speaker_index, sample_rate=SAMPLE_RATE, capture_frame_samples=CAPTURE_FRAME_SAMPLES)
+        self.tts_engine = PiperTTS(
+                            language=piper_language,
+                            voice=piper_voice,
+                            quality=piper_quality,
+                            length=PIPER_LENGTH_SCALE,
+                            noise=PIPER_NOISE_SCALE,
+                            noise_w=PIPER_NOISE_W,
+                        )
+        
         self.vad        = VAD(
                             sample_rate=SAMPLE_RATE,
                             backend=vad_backend,
@@ -390,6 +408,7 @@ class DialogManager:
                                    non_overlap=WAKEWORD_NON_OVERLAP,
                                 )
         self.mic        = AudioCapture(device=mic_index)
+        self.tts_player = TTSPlayer(device=speaker_index, sample_rate=SAMPLE_RATE, capture_frame_samples=CAPTURE_FRAME_SAMPLES)
 
         self.save_transcript_audio = save_transcript_audio
         self.transcript_audio_dir = transcript_audio_dir
