@@ -37,11 +37,13 @@ try:
     from .wakeword import WakeWord
     from .tts_piper import PiperTTS
     from .tts_player import TTSPlayer
+    from .tts_gtts import GTtsTTS
 except ImportError:
     from vad import VAD, to_float32  # type: ignore
     from wakeword import WakeWord  # type: ignore
     from tts_piper import PiperTTS  # type: ignore
     from tts_player import TTSPlayer  # type: ignore
+    from tts_gtts import GTtsTTS  # type: ignore
 
 if not logging.getLogger().handlers:
     logging.basicConfig(
@@ -100,13 +102,17 @@ WHISPER_MODEL   = "base.en"
 WHISPER_DEVICE  = "auto"  # "cuda" if GPU available
 WHISPER_COMPUTE = "auto"
 
-# Piper config
+# TTS config
+TTS_BACKEND         = "piper"  # "piper" or "gtts"
 PIPER_LANGUAGE      = "en_US"
 PIPER_VOICE         = "amy"
 PIPER_QUALITY       = "medium"
 PIPER_LENGTH_SCALE  = 1.0  # >1 slower/deeper; <1 faster
 PIPER_NOISE_SCALE   = 0.667
 PIPER_NOISE_W       = 0.8
+GTTS_LANGUAGE       = "en"
+GTTS_TLD            = "com"
+GTTS_SLOW           = False
 
 
 
@@ -289,6 +295,7 @@ class DialogManager:
                  silence_ms_after_speech=SILENCE_MS_AFTER_SPEECH,
                  no_speech_timeout: int = LISTEN_NO_SPEECH_TIMEOUT_MS,
                  post_tts_mute: int = POST_TTS_MUTE_MS,
+                 tts_backend: str = TTS_BACKEND,
                  piper_language: str = PIPER_LANGUAGE,
                  piper_voice: str = PIPER_VOICE,
                  piper_quality: str = PIPER_QUALITY,
@@ -331,6 +338,8 @@ class DialogManager:
             
             post_tts_mute (int): Milliseconds to ignore VAD after TTS playback ends.
                     This will help avoid immediate re-trigger from residual playback audio.
+
+            tts_backend (str): Which TTS backend to use ("piper" or "gtts"). Default is "piper".
 
             piper_language (str): Piper language/region code for TTS (e.g., "en_US").
                     Find more on this link: https://rhasspy.github.io/piper-samples/
@@ -379,14 +388,17 @@ class DialogManager:
         self.state = self.IDLE
         # self.package_dir         = Path(__file__).resolve().parent.parent
         self.asr        = StreamingASR(model=model, device=device, compute_type="auto")
-        self.tts_engine = PiperTTS(
-                            language=piper_language,
-                            voice=piper_voice,
-                            quality=piper_quality,
-                            length=PIPER_LENGTH_SCALE,
-                            noise=PIPER_NOISE_SCALE,
-                            noise_w=PIPER_NOISE_W,
-                        )
+        if tts_backend.lower() == "gtts":
+            self.tts_engine = GTtsTTS(language=GTTS_LANGUAGE, tld=GTTS_TLD, slow=GTTS_SLOW)
+        else:
+            self.tts_engine = PiperTTS(
+                                language=piper_language,
+                                voice=piper_voice,
+                                quality=piper_quality,
+                                length=PIPER_LENGTH_SCALE,
+                                noise=PIPER_NOISE_SCALE,
+                                noise_w=PIPER_NOISE_W,
+                            )
         
         self.vad        = VAD(
                             sample_rate=SAMPLE_RATE,
@@ -867,6 +879,7 @@ def main():
     dm = DialogManager(
         model=WHISPER_MODEL,
         device="auto",
+        tts_backend = "piper",
         on_transcript=_on_transcript,
         on_status=_on_status,
         external_policy=_my_policy,

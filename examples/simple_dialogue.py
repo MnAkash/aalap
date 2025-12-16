@@ -23,6 +23,7 @@ def main():
     dm = DialogManager(
         model="base.en",
         device="auto",
+        tts_backend = "piper", #or "gtts" (online)
         on_transcript=_on_transcript,
         on_status=_on_status,
         external_policy=_my_policy,
