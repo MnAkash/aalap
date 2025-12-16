@@ -6,6 +6,6 @@ piper-tts
 onnxruntime<2,>=1.20.1
 torch>=2.0,<3.0
 torchaudio>=2.0,<3.0
-openwakeword==0.6.0
+openwakeword @ git+https://github.com/dscripka/openWakeWord.git@af923e1d57208ec1e2377adb8bb032b4b98a6104
 requests
 tqdm
