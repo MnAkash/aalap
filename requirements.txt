@@ -10,3 +10,4 @@ openwakeword @ git+https://github.com/dscripka/openWakeWord.git@af923e1d57208ec1
 requests
 tqdm
 pydub
+gtts
