@@ -271,13 +271,15 @@ class StreamingASR:
 
 # ---------------- Dialog manager ----------------
 class DialogManager:
-    IDLE, LISTENING, RECORDING, THINKING, SPEAKING, TRANSCRIBING = (
+    IDLE, LISTENING, RECORDING, THINKING, SPEAKING, TRANSCRIBING, WAKEWORD_TRIGGER, SYSTEM_TRIGGER = (
         "IDLE",
         "LISTENING",
         "RECORDING",
         "THINKING",
         "SPEAKING",
         "TRANSCRIBING",
+        "WAKEWORD_TRIGGER",
+        "SYSTEM_TRIGGER"
     )
     '''
     IDLE            - waiting for wake word or programmatic trigger
@@ -733,7 +735,11 @@ class DialogManager:
                         ww_hit = fired
 
                     if ww_hit or forced:
-                        logger.info(f"Triggered by {'wake word' if ww_hit else 'system'}")
+                        # logger.info(f"Triggered by {'wake word' if ww_hit else 'system'}")
+                        if ww_hit:
+                            self._set_state(self.WAKEWORD_TRIGGER)
+                        else:
+                            self._set_state(self.SYSTEM_TRIGGER)
                         session_active = True
                         self._set_state(self.LISTENING)
                         utterance_frames = []
