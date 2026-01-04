@@ -1,5 +1,10 @@
 # Aalap
 
+<!-- [![Downloads](https://img.shields.io/github/downloads/MnAkash/aalap/total)](https://github.com/MnAkash/aalap/releases) -->
+[![Commits](https://img.shields.io/github/commit-activity/t/MnAkash/aalap)](https://github.com/MnAkash/aalap/commits/main)
+[![Stars](https://img.shields.io/github/stars/MnAkash/aalap)](https://github.com/MnAkash/aalap/stargazers)
+[![Forks](https://img.shields.io/github/forks/MnAkash/aalap)](https://github.com/MnAkash/aalap/network/members)
+
 Aalap is a Python voice-assistant dialogue manager that combines wake word detection, VAD, streaming ASR, and TTS playback in a single loop. It is built around a threaded state machine and is usable both as a CLI tool and a library component.
 
 ## Project status
