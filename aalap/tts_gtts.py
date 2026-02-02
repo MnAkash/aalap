@@ -1,5 +1,10 @@
 import io
+from typing import TYPE_CHECKING, Any
+
 import numpy as np
+
+if TYPE_CHECKING:
+    from pydub import AudioSegment
 
 
 class GTtsTTS:
@@ -24,7 +29,7 @@ class GTtsTTS:
         self._AudioSegment = AudioSegment
 
     @staticmethod
-    def _to_int16(segment: AudioSegment) -> np.ndarray:
+    def _to_int16(segment: "AudioSegment") -> np.ndarray:
         samples = np.array(segment.get_array_of_samples()).astype(np.int16)
         if segment.channels > 1:
             samples = samples.reshape((-1, segment.channels)).mean(axis=1).astype(np.int16)
@@ -39,4 +44,3 @@ class GTtsTTS:
         # resample to 16 kHz mono int16
         audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
         return self._to_int16(audio)
-
