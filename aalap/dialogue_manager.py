@@ -248,6 +248,21 @@ class StreamingASR:
         if not self.proc.is_alive():
             self._spawn()
 
+    def close(self, timeout_s: float = 2.0):
+        """Stop the ASR worker process cleanly."""
+        try:
+            if self.proc.is_alive():
+                try:
+                    self.in_q.put_nowait(None)
+                except Exception:
+                    pass
+                self.proc.join(timeout=timeout_s)
+                if self.proc.is_alive():
+                    self.proc.terminate()
+                    self.proc.join(timeout=1.0)
+        except Exception:
+            pass
+
     def transcribe_blocking(self, pcm16: np.ndarray, timeout_s: float = 10.0) -> str:
         self._ensure()
         # drop any stale results from previous calls
@@ -489,6 +504,10 @@ class DialogManager:
             self.mic.stop()
         except Exception:
             pass
+        try:
+            self.asr.close()
+        except Exception:
+            pass
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
 
@@ -621,7 +640,7 @@ class DialogManager:
 
         try:
             # calibrate VAD noise floor if "webrtcVAD" backend in use
-            if VAD_BACKEND == "webrtc":
+            if self.vad.backend == "webrtc":
                 logger.info("[VAD] Calibrating noise floor, please be silent...")
                 for _ in range(VAD_CALIBRATION_FRAMES):
                     if self._stop_event.is_set():

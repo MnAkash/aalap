@@ -88,7 +88,8 @@ class WakeWord:
         if self.enabled:
             models_dir = Path(os.path.expanduser("~/.cache/aalap"))
             models_dir.mkdir(parents=True, exist_ok=True)
-            self.download_models(target_directory=models_dir)
+            # Always ensure feature/VAD models are present.
+            self.download_models(model_names=[], target_directory=models_dir)
 
             melspec_model_path   = os.path.join(models_dir, "melspectrogram.onnx")
             embedding_model_path = os.path.join(models_dir, "embedding_model.onnx")
@@ -104,6 +105,7 @@ class WakeWord:
 
             # Default behavior for hey_jarvis: download if missing
             if len(self.labels) == 1 and "hey_jarvis" in self.labels[0]:
+                self.download_models(model_names=["hey_jarvis"], target_directory=models_dir)
                 wakeword_model_paths = [jarvis_model_path]
             elif not wakeword_model_paths:
                 raise ValueError("Custom wakeword specified but no model path provided. Please supply wakeword_model_paths.")
