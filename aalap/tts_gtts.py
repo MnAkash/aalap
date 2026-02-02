@@ -1,7 +1,5 @@
 import io
 import numpy as np
-from gtts import gTTS
-from pydub import AudioSegment
 
 
 class GTtsTTS:
@@ -13,6 +11,17 @@ class GTtsTTS:
         self.language = language
         self.tld = tld
         self.slow = slow
+        # Lazy import so offline/default usage doesn't require gTTS or pydub.
+        try:
+            from gtts import gTTS  # type: ignore
+            from pydub import AudioSegment  # type: ignore
+        except Exception as e:
+            raise RuntimeError(
+                "gTTS backend requested but 'gtts' and 'pydub' are not available. "
+                "Install them to use tts_backend='gtts'."
+            ) from e
+        self._gTTS = gTTS
+        self._AudioSegment = AudioSegment
 
     @staticmethod
     def _to_int16(segment: AudioSegment) -> np.ndarray:
@@ -22,11 +31,11 @@ class GTtsTTS:
         return samples
 
     def synth(self, text: str) -> np.ndarray:
-        tts = gTTS(text=text, lang=self.language, tld=self.tld, slow=self.slow)
+        tts = self._gTTS(text=text, lang=self.language, tld=self.tld, slow=self.slow)
         buf = io.BytesIO()
         tts.write_to_fp(buf)
         buf.seek(0)
-        audio = AudioSegment.from_file(buf, format="mp3")
+        audio = self._AudioSegment.from_file(buf, format="mp3")
         # resample to 16 kHz mono int16
         audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
         return self._to_int16(audio)
