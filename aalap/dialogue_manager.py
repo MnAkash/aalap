@@ -470,6 +470,7 @@ class DialogManager:
         self._speak_started_ms = 0.0
         self._speak_start_grace_ms = SPEAK_START_GRACE_MS
         self._last_activity_ms = 0.0
+        self._session_trigger_reason: Optional[str] = None
         self._refresh_activity_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._last_status = None
@@ -532,6 +533,17 @@ class DialogManager:
     def deactivate_wakeword_session(self):
         """Force the current wakeword-driven session back to IDLE."""
         self._deactivate_event.set()
+
+    def get_session_trigger_reason(self) -> Optional[str]:
+        """
+        Return the activation reason for the current session.
+
+        Returns:
+            "wakeword" if the session was activated by the wake word,
+            "system_trigger" if activated programmatically,
+            or None if no session is active.
+        """
+        return self._session_trigger_reason
 
     def speak(self, text: str):
         # reset any previous post-TTS mute state
@@ -675,6 +687,7 @@ class DialogManager:
                 # external deactivate -> drop to IDLE and clear buffers
                 if self._deactivate_event.is_set():
                     session_active = False
+                    self._session_trigger_reason = None
                     self._set_state(self.IDLE)
                     utterance_frames = []
                     silence_ms_accum = 0
@@ -769,8 +782,10 @@ class DialogManager:
                         # logger.info(f"Triggered by {'wake word' if ww_hit else 'system'}")
                         if ww_hit:
                             self._set_state(self.WAKEWORD_TRIGGER)
+                            self._session_trigger_reason = "wakeword"
                         else:
                             self._set_state(self.SYSTEM_TRIGGER)
+                            self._session_trigger_reason = "system_trigger"
                         session_active = True
                         self._set_state(self.LISTENING)
                         utterance_frames = []
@@ -881,6 +896,7 @@ class DialogManager:
                     if (now_ms - self._last_activity_ms) >= self.no_speech_timeout:
                         logger.info("[System] Inactivity timeout.")
                         session_active = False
+                        self._session_trigger_reason = None
                         self._set_state(self.IDLE)
                         utterance_frames = []
                         utterance_ms = 0
