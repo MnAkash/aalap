@@ -539,8 +539,8 @@ class DialogManager:
         Return the activation reason for the current session.
 
         Returns:
-            "wakeword" if the session was activated by the wake word,
-            "system_trigger" if activated programmatically,
+            DialogManager.WAKEWORD_TRIGGER if the session was activated by the wake word,
+            DialogManager.SYSTEM_TRIGGER if activated programmatically,
             or None if no session is active.
         """
         return self._session_trigger_reason
@@ -782,10 +782,10 @@ class DialogManager:
                         # logger.info(f"Triggered by {'wake word' if ww_hit else 'system'}")
                         if ww_hit:
                             self._set_state(self.WAKEWORD_TRIGGER)
-                            self._session_trigger_reason = "wakeword"
+                            self._session_trigger_reason = self.WAKEWORD_TRIGGER
                         else:
                             self._set_state(self.SYSTEM_TRIGGER)
-                            self._session_trigger_reason = "system_trigger"
+                            self._session_trigger_reason = self.SYSTEM_TRIGGER
                         session_active = True
                         self._set_state(self.LISTENING)
                         utterance_frames = []
