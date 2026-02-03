@@ -65,7 +65,7 @@ CAPTURE_FRAME_SAMPLES = SAMPLE_RATE * CAPTURE_FRAME_MS // 1000  # 320
 
 MAX_LISTEN_MS               = 10_000           # 10s cap to avoid huge arrays to Whisper
 MIN_SPEECH_MS               = 100            # require at least 100ms of speech before endpoint
-LISTEN_NO_SPEECH_TIMEOUT_MS = 5000  # return to IDLE if no speech within 5s (will need wakeword to re-trigger)
+LISTEN_NO_SPEECH_TIMEOUT_MS = 3500  # return to IDLE if no speech within 5s (will need wakeword to re-trigger)
 SILENCE_MS_AFTER_SPEECH     = 800
 PRE_SPEECH_MS               = 200  # prepend a bit of audio before VAD fires
 SAVE_TRANSCRIPT_AUDIO       = False
@@ -78,9 +78,9 @@ SPEAK_START_GRACE_MS        = 150  # wait after starting TTS before checking pla
 
 # Wake word
 WAKEWORD_KEYWORDS = "hey_jarvis"
-WAKEWORD_WINDOW_MS = 500
+WAKEWORD_WINDOW_MS = 800
 WAKEWORD_EMA_ALPHA     = 0.30   # smoothing, 0..1
-WAKEWORD_ARM_THRESH    = 0.05   # cross up -> fire
+WAKEWORD_ARM_THRESH    = 0.10   # cross up -> fire
 WAKEWORD_DISARM_THRESH = 0.01   # cross down -> re-arm
 # set this True to evaluate once per window (no overlapping windows)
 WAKEWORD_NON_OVERLAP   = True
@@ -318,6 +318,10 @@ class DialogManager:
                  piper_quality: str = PIPER_QUALITY,
                  wakeword_keywords: Union[str, List[str]] = WAKEWORD_KEYWORDS, # set to None to disable, default is "hey_jarvis"
                  wakeword_model_paths: Optional[Union[str, List[str]]] = None,
+                 wakeword_window_ms: int = WAKEWORD_WINDOW_MS,
+                 wakeword_ema_alpha: float = WAKEWORD_EMA_ALPHA,
+                 wakeword_arm_thresh: float = WAKEWORD_ARM_THRESH,
+                 wakeword_disarm_thresh: float = WAKEWORD_DISARM_THRESH,
                  vad_aggressiveness=WEBRTC_AGGRESSIVENESS,
                  vad_backend: str = VAD_BACKEND,
                  vad_silero_threshold: float = VAD_SILERO_THRESHOLD,
@@ -372,6 +376,14 @@ class DialogManager:
             wakeword_model_paths (List[str], optional): List of paths to wake word model path
                     corresponding to the keywords. By default pretrained models are used.
                     Make sure to name the model <wakeword>.onnx
+
+            wakeword_window_ms (int): Wake word inference window size in milliseconds.
+
+            wakeword_ema_alpha (float): EMA smoothing factor for wake word scores (0..1).
+
+            wakeword_arm_thresh (float): EMA threshold to arm/fire the wake word.
+
+            wakeword_disarm_thresh (float): EMA disarm threshold to re-arm after a fire.
 
             vad_aggressiveness (int): Aggressiveness level for WebRTC VAD (0-3).
 
@@ -430,10 +442,10 @@ class DialogManager:
                                    wakeword_model_paths=wakeword_model_paths,
                                    sample_rate=SAMPLE_RATE,
                                    frame_ms=CAPTURE_FRAME_MS,
-                                   window_ms=WAKEWORD_WINDOW_MS,
-                                   ema_alpha=WAKEWORD_EMA_ALPHA,
-                                   arm_thresh=WAKEWORD_ARM_THRESH,
-                                   disarm_thresh=WAKEWORD_DISARM_THRESH,
+                                   window_ms=wakeword_window_ms,
+                                   ema_alpha=wakeword_ema_alpha,
+                                   arm_thresh=wakeword_arm_thresh,
+                                   disarm_thresh=wakeword_disarm_thresh,
                                    non_overlap=WAKEWORD_NON_OVERLAP,
                                 )
         self.mic        = AudioCapture(device=mic_index)
