@@ -79,6 +79,18 @@ aalap
 
 This uses the defaults defined in [aalap/dialogue_manager.py](aalap/dialogue_manager.py).
 
+Show available CLI flags with:
+
+```bash
+aalap --help
+```
+
+You can override common settings directly from the CLI:
+
+```bash
+aalap --model small.en --tts-backend piper --piper-voice amy --print-status
+```
+
 On Windows, wrap any startup code that constructs and runs `DialogManager` in a `if __name__ == "__main__":` guard because the package uses `multiprocessing`.
 
 ## Quickstart (Python)

@@ -1,4 +1,5 @@
-from .dialogue_manager import DialogManager, cli
+from .cli import main as cli
+from .dialogue_manager import DialogManager
 from .list_soundDevices import list_sound_devices
 
 list_soundDevices = list_sound_devices

@@ -13,10 +13,15 @@ Usable as a CLI entry point (`aalap`) or as a library component.
 Author: Moniruzzaman Akash
 """
 
-import os, time, threading, queue, sys, subprocess, shutil, logging
+import logging
+import os
+import queue
+import shutil
+import subprocess
+import threading
+import time
 import multiprocessing as mp
 from collections import deque
-from pathlib import Path
 from typing import Callable, Optional, List, Union
 
 import numpy as np
@@ -994,63 +999,5 @@ class DialogManager:
             self.mic.stop()
             self.tts_player.close()
 
-# ---------------- Main ----------------
-def main():
-    transcript_q: queue.Queue[str] = queue.Queue()
-    status_q: queue.Queue[str] = queue.Queue()
-
-    def _on_transcript(text: str):
-        transcript_q.put(text)
-
-    def _on_status(status: str):
-        status_q.put(status)
-
-    def _my_policy(user_text: str) -> str:
-        # do API/LLM call here, blocking is fine
-        time.sleep(1.0)  # simulate thinking time
-        # return f"You said: {user_text}"
-        return ""
-
-    dm = DialogManager(
-        model=WHISPER_MODEL,
-        device="auto",
-        tts_backend = "piper",
-        on_transcript=_on_transcript,
-        on_status=_on_status,
-        external_policy=_my_policy,
-        wakeword_keywords="hey_jarvis",
-        wakeword_model_paths= None,
-        vad_silero_threshold = 0.5
-    )
-    dm.start()
-
-    try:
-        while True:
-            try:
-                status = status_q.get_nowait()
-                # print(f"[Status]: {status}")
-                pass
-            except queue.Empty:
-                pass
-            try:
-                text = transcript_q.get_nowait()
-                if text:
-                    # print(f"[Transcript]: {text}")
-                    pass
-            except queue.Empty:
-                pass
-            time.sleep(0.05)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        dm.stop()
-
-def cli():
-    try:
-        mp.set_start_method("spawn", force=True)
-    except RuntimeError:
-        pass
-    main()
-
 if __name__ == "__main__":
-    cli()
+    raise SystemExit("Run the CLI with `python -m aalap.cli` or the `aalap` console script.")

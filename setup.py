@@ -58,7 +58,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "aalap=aalap.dialogue_manager:cli",
+            "aalap=aalap.cli:main",
         ],
     },
 )
