@@ -14,16 +14,22 @@ class TTSPlayer:
         self._q = queue.Queue(maxsize=4096)     # bigger jitter buffer
         self._frames_left = 0                   # how many real frames remain
         self._silence_runs = 0                  # consecutive silent callbacks
+        self.device = device
+        self.sample_rate = sample_rate
         self.capture_frame_samples = capture_frame_samples
-        self._stream = sd.OutputStream(
-            samplerate=sample_rate,
-            channels=1,
-            dtype="int16",
-            blocksize=capture_frame_samples,    # keep 20 ms granularity
-            device=device,
-            latency=0.35,                   # extra slack to reduce underruns
-            callback=self._cb,
-        )
+        self._stream = None
+
+    def _ensure_stream(self):
+        if self._stream is None:
+            self._stream = sd.OutputStream(
+                samplerate=self.sample_rate,
+                channels=1,
+                dtype="int16",
+                blocksize=self.capture_frame_samples,    # keep 20 ms granularity
+                device=self.device,
+                latency=0.35,                   # extra slack to reduce underruns
+                callback=self._cb,
+            )
 
     # ---- internal callback ----
     def _cb(self, outdata, frames, time_info, status):
@@ -78,6 +84,7 @@ class TTSPlayer:
         # return (not self._stop.is_set()) and (self._frames_left > 0)
 
     def start(self):
+        self._ensure_stream()
         self._stream.start()
 
     def stop(self):
@@ -117,8 +124,12 @@ class TTSPlayer:
         self._silence_runs = 0
 
     def close(self):
+        if self._stream is None:
+            return
         try:
             self._stream.stop()
             self._stream.close()
         except Exception:
             pass
+        finally:
+            self._stream = None

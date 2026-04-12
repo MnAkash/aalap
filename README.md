@@ -12,7 +12,7 @@ Aalap is a Python voice-assistant dialogue manager that combines wake word detec
 - Maturity: early-stage (v0.1.0); APIs may change before 1.0.
 - Maintenance: active development.
 - Supported Python: 3.9+.
-- Platforms: tested on Ubuntu; should work on macOS and Windows with PortAudio, but not yet validated.
+- Platforms: intended for Linux and Windows; audio-device behavior and native dependency installation still need validation across more environments.
 
 ## Features
 
@@ -31,6 +31,7 @@ Aalap is a Python voice-assistant dialogue manager that combines wake word detec
 - Python 3.9+
 - PortAudio (required by [sounddevice](https://python-sounddevice.readthedocs.io/))
 - `ffmpeg` is recommended for transcript audio saving and for MP3 decoding via [pydub](https://github.com/jiaaro/pydub)
+- Some environments may build [webrtcvad](https://github.com/wiseman/py-webrtcvad) from source, which can require local C/C++ build tools.
 
 ### System packages
 
@@ -55,7 +56,7 @@ choco install portaudio ffmpeg
 ### Install with pip (no clone)
 
 ```bash
-python3 -m pip install "git+https://github.com/MnAkash/aalap.git"
+python -m pip install "git+https://github.com/MnAkash/aalap.git"
 ```
 
 Dependencies are listed in [requirements.txt](requirements.txt).
@@ -78,45 +79,56 @@ aalap
 
 This uses the defaults defined in [aalap/dialogue_manager.py](aalap/dialogue_manager.py).
 
+On Windows, wrap any startup code that constructs and runs `DialogManager` in a `if __name__ == "__main__":` guard because the package uses `multiprocessing`.
+
 ## Quickstart (Python)
 
 ```python
+import multiprocessing as mp
 import time
 import queue
-from aalap.dialogue_manager import DialogManager
+from aalap import DialogManager
 
-transcript_q: queue.Queue[str] = queue.Queue()
-status_q: queue.Queue[str] = queue.Queue()
+def main() -> None:
+    transcript_q: queue.Queue[str] = queue.Queue()
+    status_q: queue.Queue[str] = queue.Queue()
 
-def on_transcript(text: str) -> None:
-    transcript_q.put(text)
+    def on_transcript(text: str) -> None:
+        transcript_q.put(text)
 
-def on_status(status: str) -> None:
-    status_q.put(status)
+    def on_status(status: str) -> None:
+        status_q.put(status)
 
-def my_policy(user_text: str) -> str:
-    # Replace with your LLM or rules. Return a reply string.
-    return f"You said: {user_text}"
+    def my_policy(user_text: str) -> str:
+        # Replace with your LLM or rules. Return a reply string.
+        return f"You said: {user_text}"
 
-manager = DialogManager(
-    model="base.en",
-    device="auto",
-    tts_backend="piper",
-    wakeword_keywords="hey_jarvis",
-    wakeword_model_paths=None,
-    on_transcript=on_transcript,
-    on_status=on_status,
-    external_policy=my_policy,
-)
-manager.start()
+    manager = DialogManager(
+        model="base.en",
+        device="auto",
+        tts_backend="piper",
+        wakeword_keywords="hey_jarvis",
+        wakeword_model_paths=None,
+        on_transcript=on_transcript,
+        on_status=on_status,
+        external_policy=my_policy,
+    )
+    manager.start()
 
-try:
-    while True:
-        time.sleep(0.1)
-except KeyboardInterrupt:
-    pass
-finally:
-    manager.stop()
+    try:
+        while True:
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        manager.stop()
+
+if __name__ == "__main__":
+    try:
+        mp.set_start_method("spawn", force=True)
+    except RuntimeError:
+        pass
+    main()
 ```
 
 A fuller example is in [examples/simple_dialogue.py](examples/simple_dialogue.py).
@@ -182,7 +194,7 @@ See [aalap/list_soundDevices.py](aalap/list_soundDevices.py).
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).
 
 ## Collaboration
 

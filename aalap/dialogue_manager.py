@@ -203,18 +203,58 @@ class AudioCapture:
 
 # ---------------- ASR ----------------
 class ASRWorker(mp.Process):
-    def __init__(self, in_q: mp.Queue, out_q: mp.Queue, model, device, compute_type):
+    READY = "__ASR_READY__"
+    INIT_ERROR_PREFIX = "__ASR_INIT_ERROR__:"
+
+    def __init__(self, in_q: mp.Queue, out_q: mp.Queue, ready_q: mp.Queue, model, device, compute_type):
         super().__init__(daemon=True)
         self.in_q = in_q
         self.out_q = out_q
+        self.ready_q = ready_q
         self.model_name = model
         self.device = device
         self.compute_type = compute_type
 
+    def _load_model(self):
+        model_kwargs = dict(
+            model_size_or_path=self.model_name,
+            device=self.device,
+            compute_type=self.compute_type,
+            cpu_threads=4,
+            num_workers=1,
+        )
+
+        try:
+            logger.info(f"[ASR] Loading model '{self.model_name}' from local cache.")
+            return WhisperModel(local_files_only=True, **model_kwargs)
+        except Exception as cache_error:
+            logger.info(
+                f"[ASR] Local cache miss for '{self.model_name}'. "
+                "Downloading model from Hugging Face."
+            )
+            try:
+                return WhisperModel(local_files_only=False, **model_kwargs)
+            except Exception as download_error:
+                raise RuntimeError(
+                    f"Failed to load ASR model '{self.model_name}' from cache "
+                    f"or download it. Cache error: {cache_error}. "
+                    f"Download error: {download_error}"
+                ) from download_error
+
         
     def run(self):
-        model = WhisperModel(self.model_name, device=self.device, compute_type=self.compute_type,
-                             cpu_threads=4, num_workers=1)
+        try:
+            model = self._load_model()
+            try:
+                self.ready_q.put_nowait(self.READY)
+            except Exception:
+                pass
+        except Exception as e:
+            try:
+                self.ready_q.put_nowait(f"{self.INIT_ERROR_PREFIX}{e}")
+            except Exception:
+                pass
+            return
         
         while True:
             pcm16 = self.in_q.get()
@@ -236,20 +276,49 @@ class StreamingASR:
         self.model = model
         self.device = device
         self.compute_type = compute_type
-        self._spawn()
+        self.in_q = None
+        self.out_q = None
+        self.ready_q = None
+        self.proc = None
+        self._ready = False
 
     def _spawn(self):
         self.in_q = mp.Queue(maxsize=1)
         self.out_q = mp.Queue(maxsize=1)
-        self.proc = ASRWorker(self.in_q, self.out_q, self.model, self.device, self.compute_type)
+        self.ready_q = mp.Queue(maxsize=1)
+        self.proc = ASRWorker(self.in_q, self.out_q, self.ready_q, self.model, self.device, self.compute_type)
         self.proc.start()
+        self._ready = False
+
+    def ensure_started(self, timeout_s: float = 120.0) -> None:
+        self._ensure()
+        if self._ready:
+            return
+
+        t0 = time.time()
+        while time.time() - t0 < timeout_s:
+            if self.proc is None or not self.proc.is_alive():
+                raise RuntimeError("ASR worker exited before becoming ready.")
+            try:
+                msg = self.ready_q.get_nowait()
+            except queue.Empty:
+                time.sleep(0.05)
+                continue
+            if msg == ASRWorker.READY:
+                self._ready = True
+                return
+            if isinstance(msg, str) and msg.startswith(ASRWorker.INIT_ERROR_PREFIX):
+                raise RuntimeError(msg[len(ASRWorker.INIT_ERROR_PREFIX):])
+        raise TimeoutError(f"ASR worker did not become ready within {timeout_s:.1f}s.")
 
     def _ensure(self):
-        if not self.proc.is_alive():
+        if self.proc is None or not self.proc.is_alive():
             self._spawn()
 
     def close(self, timeout_s: float = 2.0):
         """Stop the ASR worker process cleanly."""
+        if self.proc is None:
+            return
         try:
             if self.proc.is_alive():
                 try:
@@ -262,9 +331,15 @@ class StreamingASR:
                     self.proc.join(timeout=1.0)
         except Exception:
             pass
+        finally:
+            self.proc = None
+            self.in_q = None
+            self.out_q = None
+            self.ready_q = None
+            self._ready = False
 
     def transcribe_blocking(self, pcm16: np.ndarray, timeout_s: float = 10.0) -> str:
-        self._ensure()
+        self.ensure_started()
         # drop any stale results from previous calls
         try:
             while True:
@@ -496,6 +571,8 @@ class DialogManager:
         """Non-blocking start"""
         if self._thread and self._thread.is_alive():
             return self._thread
+        logger.info("[ASR] Preparing Whisper model...")
+        self.asr.ensure_started()
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
@@ -523,6 +600,10 @@ class DialogManager:
             pass
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
+        try:
+            self.tts_player.close()
+        except Exception:
+            pass
 
     def trigger_wakeword(self):
         """Programmatically trigger listening. """
@@ -911,6 +992,7 @@ class DialogManager:
 
         finally:
             self.mic.stop()
+            self.tts_player.close()
 
 # ---------------- Main ----------------
 def main():
