@@ -30,6 +30,7 @@ def main():
         wakeword_keywords="hey_jarvis",
         wakeword_model_paths=None,
         vad_silero_threshold=0.5,
+        asr_timeout=5.0,
     )
     dm.start()
 
