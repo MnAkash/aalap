@@ -106,6 +106,7 @@ VAD_SILERO_MIN_SILENCE_MS   = 0
 WHISPER_MODEL   = "base.en"
 WHISPER_DEVICE  = "auto"  # "cuda" if GPU available
 WHISPER_COMPUTE = "auto"
+ASR_TIMEOUT     = 5.0
 
 # TTS config
 TTS_BACKEND         = "piper"  # "piper" or "gtts"
@@ -389,6 +390,7 @@ class DialogManager:
                  device: str = WHISPER_DEVICE,
                  mic_index: int = None,
                  speaker_index: int = None,
+                 asr_timeout: float = ASR_TIMEOUT,
                  silence_ms_after_speech=SILENCE_MS_AFTER_SPEECH,
                  no_speech_timeout: int = LISTEN_NO_SPEECH_TIMEOUT_MS,
                  post_tts_mute: int = POST_TTS_MUTE_MS,
@@ -430,6 +432,9 @@ class DialogManager:
             mic_index (int, optional): Input device index for microphone.
 
             speaker_index (int, optional): Output device index for speakers.
+
+            asr_timeout (float): Maximum seconds to wait for a transcription result
+                    before treating it as silence. Default is 5.0.
 
             silence_ms_after_speech (int): How many ms of silence after speech to
                     consider the utterance ended.
@@ -533,6 +538,7 @@ class DialogManager:
 
         self.save_transcript_audio = save_transcript_audio
         self.transcript_audio_dir = transcript_audio_dir
+        self.asr_timeout = asr_timeout
         self.system_trigger_q = queue.Queue(maxsize=1)
         self.silence_ms_after_speech = silence_ms_after_speech  # endpoint hangover
         self.no_speech_timeout = no_speech_timeout
@@ -889,7 +895,7 @@ class DialogManager:
                     total_ms = utterance_ms  # fallback in case safety cap forced endpoint
                     pcm_for_asr = np.concatenate(utterance_frames) if utterance_frames else np.array([], dtype=np.int16)
                     # print(f"[Voice] Transcribing… ({total_ms} ms)")
-                    text = self.asr.transcribe_blocking(pcm_for_asr, timeout_s=5.0)  # isolated in a worker
+                    text = self.asr.transcribe_blocking(pcm_for_asr, timeout_s=self.asr_timeout)  # isolated in a worker
                     logger.info(f"[User]: {text}")
                     try:
                         if self.on_transcript:

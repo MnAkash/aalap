@@ -88,7 +88,7 @@ aalap --help
 You can override common settings directly from the CLI:
 
 ```bash
-aalap --model small.en --tts-backend piper --piper-voice amy --print-status
+aalap --model small.en --asr-timeout 15 --tts-backend piper --piper-voice amy --print-status --print-transcripts
 ```
 
 On Windows, wrap any startup code that constructs and runs `DialogManager` in a `if __name__ == "__main__":` guard because the package uses `multiprocessing`.

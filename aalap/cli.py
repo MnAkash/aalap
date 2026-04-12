@@ -4,6 +4,7 @@ import time
 from typing import Any, Optional
 
 from .dialogue_manager import (
+    ASR_TIMEOUT,
     DialogManager,
     LISTEN_NO_SPEECH_TIMEOUT_MS,
     PIPER_LANGUAGE,
@@ -35,6 +36,7 @@ CLI_DEFAULTS: dict[str, Any] = {
     "device": WHISPER_DEVICE,
     "mic_index": None,
     "speaker_index": None,
+    "asr_timeout": ASR_TIMEOUT,
     "silence_ms_after_speech": SILENCE_MS_AFTER_SPEECH,
     "no_speech_timeout": LISTEN_NO_SPEECH_TIMEOUT_MS,
     "post_tts_mute": POST_TTS_MUTE_MS,
@@ -56,7 +58,7 @@ CLI_DEFAULTS: dict[str, Any] = {
     "vad_silero_min_silence_ms": VAD_SILERO_MIN_SILENCE_MS,
     "save_transcript_audio": SAVE_TRANSCRIPT_AUDIO,
     "transcript_audio_dir": TRANSCRIPT_AUDIO_DIR,
-    "print_transcripts": True,
+    "print_transcripts": False,
     "print_status": False,
 }
 
@@ -78,6 +80,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], help="ASR device.")
     parser.add_argument("--mic-index", type=int, help="Microphone input device index.")
     parser.add_argument("--speaker-index", type=int, help="Speaker output device index.")
+    parser.add_argument("--asr-timeout", type=float, help="Maximum seconds to wait for ASR output.")
     parser.add_argument("--tts-backend", choices=["piper", "gtts"], help="TTS backend.")
     parser.add_argument("--piper-language", help="Piper language code, e.g. en_US.")
     parser.add_argument("--piper-voice", help="Piper voice name.")
@@ -132,6 +135,7 @@ def _build_config(args: argparse.Namespace) -> dict[str, Any]:
         "device": args.device,
         "mic_index": args.mic_index,
         "speaker_index": args.speaker_index,
+        "asr_timeout": args.asr_timeout,
         "tts_backend": args.tts_backend,
         "piper_language": args.piper_language,
         "piper_voice": args.piper_voice,
@@ -168,6 +172,7 @@ def _dialog_manager_kwargs(config: dict[str, Any]) -> dict[str, Any]:
         "device": config["device"],
         "mic_index": config["mic_index"],
         "speaker_index": config["speaker_index"],
+        "asr_timeout": config["asr_timeout"],
         "silence_ms_after_speech": config["silence_ms_after_speech"],
         "no_speech_timeout": config["no_speech_timeout"],
         "post_tts_mute": config["post_tts_mute"],
