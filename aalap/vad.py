@@ -1,7 +1,6 @@
 from collections import deque
 
 import numpy as np
-import webrtcvad
 
 DEFAULT_SAMPLE_RATE = 16000
 
@@ -10,17 +9,11 @@ def to_float32(pcm16: np.ndarray) -> np.ndarray:
     return pcm16.astype(np.float32) / 32768.0
 
 
-def to_bytes(pcm16: np.ndarray) -> bytes:
-    return pcm16.astype(np.int16).tobytes()
-
-
 class VAD:
-    "Voice Activity Detection with Silero (default) or WebRTC fallback + energy gating."
+    "Voice Activity Detection with Silero."
 
     def __init__(
         self,
-        backend: str = "silero",
-        webrtc_aggressiveness=1,
         sample_rate: int = DEFAULT_SAMPLE_RATE,
         silero_threshold: float = 0.5,
         silero_window_ms: int = 320,
@@ -29,22 +22,18 @@ class VAD:
     ):
         """
         Args:
-            backend: Which VAD to use. "silero" (default) or "webrtc". Falls back to WebRTC if Silero load fails.
-            webrtc_aggressiveness: WebRTC aggressiveness 0..3. Higher = stricter (more likely to reject speech).
-            sample_rate: Input sample rate in Hz. Both VADs expect 16 kHz mono PCM16.
+            sample_rate: Input sample rate in Hz. Silero expects 16 kHz mono PCM16.
             silero_threshold: Silero speech probability threshold (0..1). Lower = more sensitive.
             silero_window_ms: Rolling window size Silero sees for a decision (ms). Longer can improve stability.
             silero_min_speech_ms: Minimum speech duration for Silero to count a segment (ms).
             silero_min_silence_ms: Minimum silence duration between segments for Silero (ms).
         """
         self.sample_rate = sample_rate
-        self.backend = backend.lower().strip()
         self.silero_threshold = silero_threshold
         self.silero_window_samples = max(1, (sample_rate * silero_window_ms) // 1000)
         self.silero_min_samples = max(1, (sample_rate * silero_min_speech_ms) // 1000)
         self.silero_min_speech_ms = silero_min_speech_ms
         self.silero_min_silence_ms = silero_min_silence_ms
-        self.webrtc_aggressiveness = webrtc_aggressiveness
 
         self._torch = None
         self._silero_model = None
@@ -55,12 +44,12 @@ class VAD:
 
         self._init_silero()
         if self._silero_model is None:
-            self.backend = "webrtc"
-            self._init_webrtc(self.webrtc_aggressiveness)
+            raise RuntimeError(
+                "Silero VAD could not be initialized. "
+                "Check your torch/network environment and try again."
+            )
 
     def _init_silero(self):
-        if self.backend != "silero":
-            return
         try:
             import torch
 
@@ -77,15 +66,8 @@ class VAD:
             self._silero_model.to(self._device)
             self._silero_model.eval()
         except Exception as e:
-            print(f"[VAD] Silero load failed ({e}). Falling back to WebRTC.")
+            print(f"[VAD] Silero load failed ({e}).")
             self._silero_model = None
-
-    def _init_webrtc(self, aggressiveness: int):
-        self.v = webrtcvad.Vad(aggressiveness)
-        # Noise floor for VAD gating
-        self.noise_rms = 0.01           # initial guess
-        self.noise_alpha = 0.10         # how fast we track noise (0..1)
-        self.speech_snr = 4.0    # speech must be > SNR * noise 
 
     def _push_silero_frame(self, pcm: np.ndarray):
         self._silero_buf.append(pcm.copy())
@@ -120,33 +102,12 @@ class VAD:
                 )
             return len(ts) > 0
         except Exception as e:
-            print(f"[VAD] Silero error ({e}); switching to WebRTC.")
-            self.backend = "webrtc"
-            self._init_webrtc(self.webrtc_aggressiveness)
-            return self._is_speech_webrtc(pcm)
-
-    def _is_speech_webrtc(self, pcm: np.ndarray) -> bool:
-        pcm16_bytes = to_float32(pcm)
-        rms = float(np.sqrt(np.mean(pcm16_bytes * pcm16_bytes) + 1e-12))
-
-        clean_b = to_bytes(pcm)
-        vad_flag = self.v.is_speech(clean_b, self.sample_rate)
-
-        if not vad_flag:
-            self.noise_rms = (1.0 - self.noise_alpha) * self.noise_rms + self.noise_alpha * rms
-
-        is_speech = vad_flag and (rms > self.speech_snr * max(self.noise_rms, 1e-6))
-
-        return is_speech
+            raise RuntimeError(f"Silero VAD failed during inference: {e}") from e
 
     def is_speech(self, pcm: np.ndarray) -> bool:
-        if self.backend == "silero" and self._silero_model is not None:
-            return self._is_speech_silero(pcm)
-        return self._is_speech_webrtc(pcm)
+        return self._is_speech_silero(pcm)
 
     def reset(self):
         """Clear internal buffers/state so old audio does not leak into the next decision."""
         self._silero_buf.clear()
         self._silero_buf_samples = 0
-        # Reset noise tracking for WebRTC gating
-        self.noise_rms = 0.01

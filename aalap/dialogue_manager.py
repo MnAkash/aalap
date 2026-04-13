@@ -4,7 +4,7 @@ Interactive voice loop with wake word activation, VAD, streaming ASR, and TTS pl
 
 Core pieces:
 - Wake word detection via openWakeWord (custom model support) and programmatic trigger.
-- WebRTC/Silero VAD at 16 kHz / 20 ms frames with barge-in handling.
+- Silero VAD at 16 kHz / 20 ms frames with barge-in handling.
 - Streaming ASR using faster-whisper and Piper TTS playback on shared PortAudio devices.
 - Optional transcript saving and a simple policy hook for responses.
 
@@ -93,8 +93,6 @@ WAKEWORD_NON_OVERLAP   = True
 
 
 # VAD
-WEBRTC_AGGRESSIVENESS       = 1  # 0..3 (lower the value to make it more sensitive to voice)
-VAD_BACKEND                 = "silero" # "silero" or "webrtc"
 VAD_SILERO_THRESHOLD        = 0.5  # 0..1, lower = more sensitive
 VAD_SILERO_WINDOW_MS        = 320
 VAD_SILERO_MIN_SPEECH_MS    = 60
@@ -404,8 +402,6 @@ class DialogManager:
                  wakeword_ema_alpha: float = WAKEWORD_EMA_ALPHA,
                  wakeword_arm_thresh: float = WAKEWORD_ARM_THRESH,
                  wakeword_disarm_thresh: float = WAKEWORD_DISARM_THRESH,
-                 vad_aggressiveness=WEBRTC_AGGRESSIVENESS,
-                 vad_backend: str = VAD_BACKEND,
                  vad_silero_threshold: float = VAD_SILERO_THRESHOLD,
                  vad_silero_window_ms: int = VAD_SILERO_WINDOW_MS,
                  vad_silero_min_speech_ms: int = VAD_SILERO_MIN_SPEECH_MS,
@@ -470,11 +466,6 @@ class DialogManager:
 
             wakeword_disarm_thresh (float): EMA disarm threshold to re-arm after a fire.
 
-            vad_aggressiveness (int): Aggressiveness level for WebRTC VAD (0-3).
-
-            vad_backend (str): VAD backend to use: "webrtc" or "silero".
-                    Default is "silero".
-
             vad_silero_threshold (float): Sensitivity threshold for Silero VAD (0-1).
 
             vad_silero_window_ms (int): Window size in ms for Silero VAD.
@@ -516,8 +507,6 @@ class DialogManager:
         
         self.vad        = VAD(
                             sample_rate=SAMPLE_RATE,
-                            backend=vad_backend,
-                            webrtc_aggressiveness=vad_aggressiveness,
                             silero_threshold=vad_silero_threshold,
                             silero_window_ms=vad_silero_window_ms,
                             silero_min_speech_ms=vad_silero_min_speech_ms,
@@ -755,14 +744,6 @@ class DialogManager:
         self._last_activity_ms = 0  # updated on every user-speech VAD=true
 
         try:
-            # calibrate VAD noise floor if "webrtcVAD" backend in use
-            if self.vad.backend == "webrtc":
-                logger.info("[VAD] Calibrating noise floor, please be silent...")
-                for _ in range(VAD_CALIBRATION_FRAMES):
-                    if self._stop_event.is_set():
-                        break
-                    frame = self.mic.read_frame()
-                    self.vad.is_speech(frame)
             if self.ww.labels:
                 logger.info(f"[System] Ready: Say the wake word {self.ww.labels} or call trigger_wakeword().")
             else:

@@ -17,7 +17,7 @@ Aalap is a Python voice-assistant dialogue manager that combines wake word detec
 ## Features
 
 - Wake word detection via [openWakeWord](https://github.com/dscripka/openWakeWord) with smoothing, hysteresis, and custom model support.
-- Voice activity detection using [Silero VAD](https://github.com/snakers4/silero-vad) (default) with [WebRTC VAD](https://github.com/wiseman/py-webrtcvad) fallback.
+- Voice activity detection using [Silero VAD](https://github.com/snakers4/silero-vad).
 - Streaming ASR in a worker process using [faster-whisper](https://github.com/SYSTRAN/faster-whisper).
 - Offline TTS with [Piper](https://github.com/rhasspy/piper) or online TTS via [gTTS](https://github.com/pndurette/gTTS).
 - Shared input/output audio backend with [sounddevice](https://python-sounddevice.readthedocs.io/) and barge-in handling.
@@ -31,7 +31,6 @@ Aalap is a Python voice-assistant dialogue manager that combines wake word detec
 - Python 3.9+
 - PortAudio (required by [sounddevice](https://python-sounddevice.readthedocs.io/))
 - `ffmpeg` is recommended for transcript audio saving and for MP3 decoding via [pydub](https://github.com/jiaaro/pydub)
-- Some environments may build [webrtcvad](https://github.com/wiseman/py-webrtcvad) from source, which can require local C/C++ build tools.
 
 ### System packages
 
@@ -171,7 +170,7 @@ When you pass `on_status`, the callback receives the dialog state string emitted
 Most knobs are in [aalap/dialogue_manager.py](aalap/dialogue_manager.py) and exposed through the `DialogManager` constructor.
 
 - Wake word: `wakeword_keywords`, `wakeword_model_paths` (see [aalap/wakeword.py](aalap/wakeword.py))
-- VAD: `vad_backend`, `vad_silero_threshold`, `vad_silero_window_ms`, `vad_silero_min_speech_ms`
+- VAD: `vad_silero_threshold`, `vad_silero_window_ms`, `vad_silero_min_speech_ms`, `vad_silero_min_silence_ms`
 - ASR: `model`, `device` (uses [faster-whisper](https://github.com/SYSTRAN/faster-whisper))
 - TTS: `tts_backend`, `piper_language`, `piper_voice`, `piper_quality`
 - Timing: `silence_ms_after_speech`, `no_speech_timeout`, `post_tts_mute`

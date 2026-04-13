@@ -15,7 +15,6 @@ from .dialogue_manager import (
     SILENCE_MS_AFTER_SPEECH,
     TRANSCRIPT_AUDIO_DIR,
     TTS_BACKEND,
-    VAD_BACKEND,
     VAD_SILERO_MIN_SILENCE_MS,
     VAD_SILERO_MIN_SPEECH_MS,
     VAD_SILERO_THRESHOLD,
@@ -25,7 +24,6 @@ from .dialogue_manager import (
     WAKEWORD_EMA_ALPHA,
     WAKEWORD_KEYWORDS,
     WAKEWORD_WINDOW_MS,
-    WEBRTC_AGGRESSIVENESS,
     WHISPER_DEVICE,
     WHISPER_MODEL,
 )
@@ -50,8 +48,6 @@ CLI_DEFAULTS: dict[str, Any] = {
     "wakeword_ema_alpha": WAKEWORD_EMA_ALPHA,
     "wakeword_arm_thresh": WAKEWORD_ARM_THRESH,
     "wakeword_disarm_thresh": WAKEWORD_DISARM_THRESH,
-    "vad_aggressiveness": WEBRTC_AGGRESSIVENESS,
-    "vad_backend": VAD_BACKEND,
     "vad_silero_threshold": VAD_SILERO_THRESHOLD,
     "vad_silero_window_ms": VAD_SILERO_WINDOW_MS,
     "vad_silero_min_speech_ms": VAD_SILERO_MIN_SPEECH_MS,
@@ -97,8 +93,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--wakeword-ema-alpha", type=float, help="Wakeword EMA smoothing factor.")
     parser.add_argument("--wakeword-arm-thresh", type=float, help="Wakeword trigger threshold.")
     parser.add_argument("--wakeword-disarm-thresh", type=float, help="Wakeword re-arm threshold.")
-    parser.add_argument("--vad-backend", choices=["silero", "webrtc"], help="VAD backend.")
-    parser.add_argument("--vad-aggressiveness", type=int, help="WebRTC aggressiveness 0-3.")
     parser.add_argument("--vad-silero-threshold", type=float, help="Silero VAD threshold 0-1.")
     parser.add_argument("--vad-silero-window-ms", type=int, help="Silero VAD rolling window size.")
     parser.add_argument("--vad-silero-min-speech-ms", type=int, help="Silero minimum speech duration.")
@@ -146,8 +140,6 @@ def _build_config(args: argparse.Namespace) -> dict[str, Any]:
         "wakeword_ema_alpha": args.wakeword_ema_alpha,
         "wakeword_arm_thresh": args.wakeword_arm_thresh,
         "wakeword_disarm_thresh": args.wakeword_disarm_thresh,
-        "vad_backend": args.vad_backend,
-        "vad_aggressiveness": args.vad_aggressiveness,
         "vad_silero_threshold": args.vad_silero_threshold,
         "vad_silero_window_ms": args.vad_silero_window_ms,
         "vad_silero_min_speech_ms": args.vad_silero_min_speech_ms,
@@ -186,8 +178,6 @@ def _dialog_manager_kwargs(config: dict[str, Any]) -> dict[str, Any]:
         "wakeword_ema_alpha": config["wakeword_ema_alpha"],
         "wakeword_arm_thresh": config["wakeword_arm_thresh"],
         "wakeword_disarm_thresh": config["wakeword_disarm_thresh"],
-        "vad_aggressiveness": config["vad_aggressiveness"],
-        "vad_backend": config["vad_backend"],
         "vad_silero_threshold": config["vad_silero_threshold"],
         "vad_silero_window_ms": config["vad_silero_window_ms"],
         "vad_silero_min_speech_ms": config["vad_silero_min_speech_ms"],
