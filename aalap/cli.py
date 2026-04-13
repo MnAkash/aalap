@@ -54,8 +54,6 @@ CLI_DEFAULTS: dict[str, Any] = {
     "vad_silero_min_silence_ms": VAD_SILERO_MIN_SILENCE_MS,
     "save_transcript_audio": SAVE_TRANSCRIPT_AUDIO,
     "transcript_audio_dir": TRANSCRIPT_AUDIO_DIR,
-    "print_transcripts": False,
-    "print_status": False,
 }
 
 
@@ -107,18 +105,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Enable or disable saving transcript audio for debugging.",
     )
-    parser.add_argument(
-        "--print-transcripts",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="Print transcript text to stdout.",
-    )
-    parser.add_argument(
-        "--print-status",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="Print status transitions to stdout.",
-    )
     return parser
 
 
@@ -149,8 +135,6 @@ def _build_config(args: argparse.Namespace) -> dict[str, Any]:
         "post_tts_mute": args.post_tts_mute,
         "save_transcript_audio": args.save_transcript_audio,
         "transcript_audio_dir": args.transcript_audio_dir,
-        "print_transcripts": args.print_transcripts,
-        "print_status": args.print_status,
     }
     for key, value in overrides.items():
         if value is not None:
@@ -188,20 +172,12 @@ def _dialog_manager_kwargs(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def run(config: Optional[dict[str, Any]] = None) -> int:
-    merged_config = dict(CLI_DEFAULTS if config is None else config)
-
-    def _on_transcript(text: str) -> None:
-        if merged_config["print_transcripts"] and text:
-            print(text, flush=True)
-
-    def _on_status(status: str) -> None:
-        if merged_config["print_status"]:
-            print(status, flush=True)
+    merged_config = dict(CLI_DEFAULTS)
+    if config:
+        merged_config.update(config)
 
     dm = DialogManager(
         **_dialog_manager_kwargs(merged_config),
-        on_transcript=_on_transcript if merged_config["print_transcripts"] else None,
-        on_status=_on_status if merged_config["print_status"] else None,
         external_policy=None,
     )
     dm.start()
