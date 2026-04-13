@@ -230,20 +230,27 @@ class ASRWorker(mp.Process):
 
         try:
             logger.info(f"[ASR] Loading model '{self.model_name}' from local cache.")
-            return WhisperModel(local_files_only=True, **model_kwargs)
+            model = WhisperModel(local_files_only=True, **model_kwargs)
         except Exception as cache_error:
             logger.info(
                 f"[ASR] Local cache miss for '{self.model_name}'. "
                 "Downloading model from Hugging Face."
             )
             try:
-                return WhisperModel(local_files_only=False, **model_kwargs)
+                model = WhisperModel(local_files_only=False, **model_kwargs)
             except Exception as download_error:
                 raise RuntimeError(
                     f"Failed to load ASR model '{self.model_name}' from cache "
                     f"or download it. Cache error: {cache_error}. "
                     f"Download error: {download_error}"
                 ) from download_error
+        runtime_model = model.model
+        logger.info(
+            f"[ASR] Using device='{runtime_model.device}' "
+            f"device_index={runtime_model.device_index} "
+            f"compute_type='{runtime_model.compute_type}'."
+        )
+        return model
 
         
     def run(self):
