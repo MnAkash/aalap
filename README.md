@@ -170,6 +170,7 @@ When you pass `on_status`, the callback receives the dialog state string emitted
 Most knobs are in [aalap/dialogue_manager.py](aalap/dialogue_manager.py) and exposed through the `DialogManager` constructor.
 
 - Wake word: `wakeword_keywords`, `wakeword_model_paths` (see [aalap/wakeword.py](aalap/wakeword.py))
+- Wake-word VAD gate: `wakeword_vad_threshold` enables openWakeWord's internal Silero VAD gating for wake-word scoring. Set `0` to disable.
 - VAD: `vad_silero_threshold`, `vad_silero_window_ms`, `vad_silero_min_speech_ms`, `vad_silero_min_silence_ms`
 - ASR: `model`, `device` (uses [faster-whisper](https://github.com/SYSTRAN/faster-whisper))
 - TTS: `tts_backend`, `piper_language`, `piper_voice`, `piper_quality`

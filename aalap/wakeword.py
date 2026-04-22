@@ -1,4 +1,5 @@
 import os
+import shutil
 from collections import deque
 from pathlib import Path
 from typing import Optional, List, Union
@@ -56,6 +57,7 @@ class WakeWord:
         ema_alpha: float = 0.30,
         arm_thresh: float = 0.05,
         disarm_thresh: float = 0.01,
+        vad_threshold: float = 0.5,
         non_overlap: bool = True,
     ):
         if isinstance(wakeword_keywords, str):
@@ -83,6 +85,7 @@ class WakeWord:
         self.ema_alpha = ema_alpha
         self.arm_thresh = arm_thresh
         self.disarm_thresh = disarm_thresh
+        self.vad_threshold = vad_threshold
         self.non_overlap = non_overlap
 
         if self.enabled:
@@ -90,6 +93,7 @@ class WakeWord:
             models_dir.mkdir(parents=True, exist_ok=True)
             # Always ensure feature/VAD models are present.
             self.download_models(model_names=[], target_directory=models_dir)
+            self._ensure_openwakeword_vad_model(models_dir)
 
             melspec_model_path   = os.path.join(models_dir, "melspectrogram.onnx")
             embedding_model_path = os.path.join(models_dir, "embedding_model.onnx")
@@ -113,9 +117,37 @@ class WakeWord:
             # print("Using wakeowrd path: ", wakeword_model_paths)
             self.model = OWWModel(wakeword_models=wakeword_model_paths,
                                   inference_framework='onnx',
+                                  vad_threshold=self.vad_threshold,
                                   melspec_model_path = melspec_model_path,
                                   embedding_model_path = embedding_model_path
                                   )
+
+    def _ensure_openwakeword_vad_model(self, models_dir: Path) -> None:
+        """
+        openWakeWord's internal VAD loader expects a packaged resource path.
+        Reuse Aalap's cached silero_vad.onnx by linking or copying it there.
+        """
+        if self.vad_threshold <= 0:
+            return
+
+        cache_vad_path = models_dir / "silero_vad.onnx"
+        if not cache_vad_path.exists():
+            return
+
+        try:
+            import openwakeword
+        except Exception:
+            return
+
+        package_vad_path = Path(openwakeword.__file__).resolve().parent / "resources" / "models" / "silero_vad.onnx"
+        if package_vad_path.exists():
+            return
+
+        package_vad_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            package_vad_path.symlink_to(cache_vad_path)
+        except OSError:
+            shutil.copy2(cache_vad_path, package_vad_path)
 
     def _predict_score(self, window_i16: np.ndarray) -> float:
         preds = self.model.predict(window_i16) or {}

@@ -87,6 +87,7 @@ WAKEWORD_WINDOW_MS = 800
 WAKEWORD_EMA_ALPHA     = 0.30   # smoothing, 0..1
 WAKEWORD_ARM_THRESH    = 0.10   # cross up -> fire
 WAKEWORD_DISARM_THRESH = 0.01   # cross down -> re-arm
+WAKEWORD_VAD_THRESHOLD = 0.00   # openWakeWord Silero VAD gating; 0 disables
 # set this True to evaluate once per window (no overlapping windows)
 WAKEWORD_NON_OVERLAP   = True
 
@@ -409,6 +410,7 @@ class DialogManager:
                  wakeword_ema_alpha: float = WAKEWORD_EMA_ALPHA,
                  wakeword_arm_thresh: float = WAKEWORD_ARM_THRESH,
                  wakeword_disarm_thresh: float = WAKEWORD_DISARM_THRESH,
+                 wakeword_vad_threshold: float = WAKEWORD_VAD_THRESHOLD,
                  vad_silero_threshold: float = VAD_SILERO_THRESHOLD,
                  vad_silero_window_ms: int = VAD_SILERO_WINDOW_MS,
                  vad_silero_min_speech_ms: int = VAD_SILERO_MIN_SPEECH_MS,
@@ -473,6 +475,9 @@ class DialogManager:
 
             wakeword_disarm_thresh (float): EMA disarm threshold to re-arm after a fire.
 
+            wakeword_vad_threshold (float): openWakeWord's internal Silero VAD
+                    gating threshold (0-1). Set to 0 to disable wake-word VAD gating.
+
             vad_silero_threshold (float): Sensitivity threshold for Silero VAD (0-1).
 
             vad_silero_window_ms (int): Window size in ms for Silero VAD.
@@ -527,6 +532,7 @@ class DialogManager:
                                    ema_alpha=wakeword_ema_alpha,
                                    arm_thresh=wakeword_arm_thresh,
                                    disarm_thresh=wakeword_disarm_thresh,
+                                   vad_threshold=wakeword_vad_threshold,
                                    non_overlap=WAKEWORD_NON_OVERLAP,
                                 )
         self.mic        = AudioCapture(device=mic_index)
