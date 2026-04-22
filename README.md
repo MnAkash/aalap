@@ -120,6 +120,10 @@ def main() -> None:
         tts_backend="piper",
         wakeword_keywords="hey_jarvis",
         wakeword_model_paths=None,
+        wakeword_score_thresh=0.45,
+        wakeword_patience_frames=2,
+        wakeword_debounce_ms=900,
+        wakeword_vad_threshold=0.0,
         on_transcript=on_transcript,
         on_status=on_status,
         external_policy=my_policy,
@@ -170,7 +174,9 @@ When you pass `on_status`, the callback receives the dialog state string emitted
 Most knobs are in [aalap/dialogue_manager.py](aalap/dialogue_manager.py) and exposed through the `DialogManager` constructor.
 
 - Wake word: `wakeword_keywords`, `wakeword_model_paths` (see [aalap/wakeword.py](aalap/wakeword.py))
+- Wake-word trigger policy: `wakeword_score_thresh`, `wakeword_patience_frames`, `wakeword_debounce_ms`
 - Wake-word VAD gate: `wakeword_vad_threshold` enables openWakeWord's internal Silero VAD gating for wake-word scoring. Set `0` to disable.
+- Wake-word debug: `wakeword_debug`, `save_wakeword_debug_audio`, `wakeword_debug_audio_dir`
 - VAD: `vad_silero_threshold`, `vad_silero_window_ms`, `vad_silero_min_speech_ms`, `vad_silero_min_silence_ms`
 - ASR: `model`, `device` (uses [faster-whisper](https://github.com/SYSTRAN/faster-whisper))
 - TTS: `tts_backend`, `piper_language`, `piper_voice`, `piper_quality`

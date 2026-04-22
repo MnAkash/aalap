@@ -29,6 +29,10 @@ def main():
         external_policy=_my_policy,
         wakeword_keywords="hey_jarvis",
         wakeword_model_paths=None,
+        wakeword_score_thresh=0.45,
+        wakeword_patience_frames=2,
+        wakeword_debounce_ms=900,
+        wakeword_vad_threshold=0.0,
         vad_silero_threshold=0.5,
         asr_timeout=5.0,
     )

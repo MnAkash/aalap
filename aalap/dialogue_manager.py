@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import threading
 import time
+import wave
 import multiprocessing as mp
 from collections import deque
 from typing import Callable, Optional, List, Union
@@ -83,13 +84,19 @@ SPEAK_START_GRACE_MS        = 150  # wait after starting TTS before checking pla
 
 # Wake word
 WAKEWORD_KEYWORDS = "hey_jarvis"
-WAKEWORD_WINDOW_MS = 800
-WAKEWORD_EMA_ALPHA     = 0.30   # smoothing, 0..1
-WAKEWORD_ARM_THRESH    = 0.10   # cross up -> fire
-WAKEWORD_DISARM_THRESH = 0.01   # cross down -> re-arm
 WAKEWORD_VAD_THRESHOLD = 0.00   # openWakeWord Silero VAD gating; 0 disables
-# set this True to evaluate once per window (no overlapping windows)
-WAKEWORD_NON_OVERLAP   = True
+WAKEWORD_SCORE_THRESH  = 0.45
+WAKEWORD_PATIENCE_FRAMES = 2
+WAKEWORD_DEBOUNCE_MS   = 900
+WAKEWORD_HANDOFF_MS    = 400
+WAKEWORD_HANDOFF_FRAMES = max(0, WAKEWORD_HANDOFF_MS // CAPTURE_FRAME_MS)
+WAKEWORD_DEBUG         = False
+SAVE_WAKEWORD_DEBUG_AUDIO = False
+WAKEWORD_DEBUG_AUDIO_DIR = "debug_wakeword"
+WAKEWORD_DEBUG_PRE_MS  = 1000
+WAKEWORD_DEBUG_POST_MS = 750
+WAKEWORD_DEBUG_PRE_FRAMES = max(0, WAKEWORD_DEBUG_PRE_MS // CAPTURE_FRAME_MS)
+WAKEWORD_DEBUG_POST_FRAMES = max(0, WAKEWORD_DEBUG_POST_MS // CAPTURE_FRAME_MS)
 
 
 
@@ -406,11 +413,13 @@ class DialogManager:
                  piper_quality: str = PIPER_QUALITY,
                  wakeword_keywords: Union[str, List[str]] = WAKEWORD_KEYWORDS, # set to None to disable, default is "hey_jarvis"
                  wakeword_model_paths: Optional[Union[str, List[str]]] = None,
-                 wakeword_window_ms: int = WAKEWORD_WINDOW_MS,
-                 wakeword_ema_alpha: float = WAKEWORD_EMA_ALPHA,
-                 wakeword_arm_thresh: float = WAKEWORD_ARM_THRESH,
-                 wakeword_disarm_thresh: float = WAKEWORD_DISARM_THRESH,
                  wakeword_vad_threshold: float = WAKEWORD_VAD_THRESHOLD,
+                 wakeword_score_thresh: float = WAKEWORD_SCORE_THRESH,
+                 wakeword_patience_frames: int = WAKEWORD_PATIENCE_FRAMES,
+                 wakeword_debounce_ms: int = WAKEWORD_DEBOUNCE_MS,
+                 wakeword_debug: bool = WAKEWORD_DEBUG,
+                 save_wakeword_debug_audio: bool = SAVE_WAKEWORD_DEBUG_AUDIO,
+                 wakeword_debug_audio_dir: str = WAKEWORD_DEBUG_AUDIO_DIR,
                  vad_silero_threshold: float = VAD_SILERO_THRESHOLD,
                  vad_silero_window_ms: int = VAD_SILERO_WINDOW_MS,
                  vad_silero_min_speech_ms: int = VAD_SILERO_MIN_SPEECH_MS,
@@ -467,16 +476,23 @@ class DialogManager:
                     corresponding to the keywords. By default pretrained models are used.
                     Make sure to name the model <wakeword>.onnx
 
-            wakeword_window_ms (int): Wake word inference window size in milliseconds.
-
-            wakeword_ema_alpha (float): EMA smoothing factor for wake word scores (0..1).
-
-            wakeword_arm_thresh (float): EMA threshold to arm/fire the wake word.
-
-            wakeword_disarm_thresh (float): EMA disarm threshold to re-arm after a fire.
-
             wakeword_vad_threshold (float): openWakeWord's internal Silero VAD
                     gating threshold (0-1). Set to 0 to disable wake-word VAD gating.
+
+            wakeword_score_thresh (float): Wake-word score threshold for a positive frame.
+
+            wakeword_patience_frames (int): Number of positive wake-word frames required
+                    before firing.
+
+            wakeword_debounce_ms (int): Cooldown after a trigger before the wake word
+                    can fire again.
+
+            wakeword_debug (bool): Emit wake-word trigger and near-trigger logs.
+
+            save_wakeword_debug_audio (bool): Save short WAV clips around wake-word
+                    trigger and near-trigger events.
+
+            wakeword_debug_audio_dir (str): Directory to save wake-word debug clips.
 
             vad_silero_threshold (float): Sensitivity threshold for Silero VAD (0-1).
 
@@ -528,12 +544,10 @@ class DialogManager:
                                    wakeword_model_paths=wakeword_model_paths,
                                    sample_rate=SAMPLE_RATE,
                                    frame_ms=CAPTURE_FRAME_MS,
-                                   window_ms=wakeword_window_ms,
-                                   ema_alpha=wakeword_ema_alpha,
-                                   arm_thresh=wakeword_arm_thresh,
-                                   disarm_thresh=wakeword_disarm_thresh,
                                    vad_threshold=wakeword_vad_threshold,
-                                   non_overlap=WAKEWORD_NON_OVERLAP,
+                                   score_thresh=wakeword_score_thresh,
+                                   patience_frames=wakeword_patience_frames,
+                                   debounce_ms=wakeword_debounce_ms,
                                 )
         self.mic        = AudioCapture(device=mic_index)
         self.tts_player = TTSPlayer(device=speaker_index, sample_rate=SAMPLE_RATE, capture_frame_samples=CAPTURE_FRAME_SAMPLES)
@@ -562,6 +576,9 @@ class DialogManager:
         self._refresh_activity_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._last_status = None
+        self.wakeword_debug = wakeword_debug
+        self.save_wakeword_debug_audio = save_wakeword_debug_audio
+        self.wakeword_debug_audio_dir = wakeword_debug_audio_dir
         self._emit_status(self.state)
 
     def _emit_status(self, status: str, poststring: str = ""):
@@ -742,13 +759,67 @@ class DialogManager:
         except Exception as e:
             logger.error(f"[DebugAudio] Failed to save audio: {e}")
 
+    def _log_wakeword_event(self, event) -> None:
+        if not self.wakeword_debug:
+            return
+        logger.info(
+            "[WakeWord] %s label=%s score=%.3f threshold=%.3f patience=%d/%d",
+            event.kind,
+            event.label,
+            event.score,
+            event.threshold,
+            event.consecutive_hits,
+            event.patience_frames,
+        )
+
+    def _start_wakeword_debug_capture(self, event, pre_frames: list[np.ndarray]) -> dict[str, object]:
+        return {
+            "event": event,
+            "frames": [frame.copy() for frame in pre_frames],
+            "remaining_post_frames": WAKEWORD_DEBUG_POST_FRAMES,
+        }
+
+    def _flush_wakeword_debug_capture(self, capture: dict[str, object]) -> None:
+        frames: list[np.ndarray] = capture["frames"]  # type: ignore[assignment]
+        if not frames:
+            return
+        pcm16 = np.concatenate(frames)
+        if pcm16.size == 0:
+            return
+
+        try:
+            os.makedirs(self.wakeword_debug_audio_dir, exist_ok=True)
+        except Exception as e:
+            logger.warning(f"[WakeWordDebug] Could not create dir {self.wakeword_debug_audio_dir}: {e}")
+            return
+
+        event = capture["event"]
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        millis = int(time.time() * 1000.0) % 1000
+        label = "".join(ch for ch in getattr(event, "label", "wakeword") if ch.isalnum() or ch in ("-", "_")) or "wakeword"
+        fname = f"{event.kind}_{ts}_{millis:03d}_{label}_{event.score:.2f}.wav"
+        out_path = os.path.join(self.wakeword_debug_audio_dir, fname)
+
+        try:
+            with wave.open(out_path, "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(SAMPLE_RATE)
+                wav_file.writeframes(pcm16.astype(np.int16).tobytes())
+            logger.info("[WakeWordDebug] Saved %s clip to %s", event.kind, out_path)
+        except Exception as e:
+            logger.error(f"[WakeWordDebug] Failed to save clip: {e}")
+
     def _run_loop(self):
         self.mic.start()
         self.tts_player.start()
 
         utterance_frames: list[np.ndarray] = []
         silence_ms_accum = 0
-        preroll_frames = deque(maxlen=PRE_SPEECH_FRAMES)
+        preroll_frames = deque(maxlen=max(PRE_SPEECH_FRAMES, WAKEWORD_HANDOFF_FRAMES))
+        wakeword_handoff_frames = deque(maxlen=WAKEWORD_HANDOFF_FRAMES)
+        wakeword_debug_frames = deque(maxlen=WAKEWORD_DEBUG_PRE_FRAMES)
+        pending_wakeword_captures: list[dict[str, object]] = []
 
         utterance_ms = 0
         had_any_speech = False
@@ -765,9 +836,24 @@ class DialogManager:
                 cap = self.mic.read_frame()  # int16
                 clean = cap  # raw audio, no AEC
                 clean_f32 = to_float32(clean)
+                now_ms = int(time.time() * 1000.0)
+
+                if self.save_wakeword_debug_audio:
+                    wakeword_debug_frames.append(clean.copy())
+
+                if pending_wakeword_captures:
+                    completed_captures: list[dict[str, object]] = []
+                    for capture in pending_wakeword_captures:
+                        capture["frames"].append(clean.copy())  # type: ignore[index]
+                        capture["remaining_post_frames"] = int(capture["remaining_post_frames"]) - 1
+                        if int(capture["remaining_post_frames"]) <= 0:
+                            completed_captures.append(capture)
+                    for capture in completed_captures:
+                        self._flush_wakeword_debug_capture(capture)
+                        pending_wakeword_captures.remove(capture)
 
                 if self._refresh_activity_event.is_set():
-                    self._last_activity_ms = int(time.time() * 1000.0)
+                    self._last_activity_ms = now_ms
                     self._refresh_activity_event.clear()
 
                 # external deactivate -> drop to IDLE and clear buffers
@@ -778,9 +864,11 @@ class DialogManager:
                     utterance_frames = []
                     silence_ms_accum = 0
                     preroll_frames.clear()
+                    wakeword_handoff_frames.clear()
                     utterance_ms = 0
                     had_any_speech = False
                     self.vad.reset()
+                    self.ww.reset()
                     self.mic.drain()
                     self._deactivate_event.clear()
                     continue
@@ -805,13 +893,13 @@ class DialogManager:
                         utterance_frames = []
                         utterance_ms = 0
                         had_any_speech = False
-                        self._last_activity_ms = int(time.time() * 1000.0)
+                        self._last_activity_ms = now_ms
                     time.sleep(0.001)
                     continue
 
                 # ========================= SPEAKING mode =========================
                 if self.state == self.SPEAKING:
-                    self._last_activity_ms = int(time.time() * 1000.0)
+                    self._last_activity_ms = now_ms
 
                     # allow play() / audio callback to spin up before checking status
                     if self._speak_pending:
@@ -841,8 +929,11 @@ class DialogManager:
                                 preroll_frames.clear()
                                 utterance_ms = 0
                                 had_any_speech = False
+                                self.vad.reset()
                             else:
                                 self._set_state(self.IDLE)
+                                wakeword_handoff_frames.clear()
+                                self.ww.reset()
 
                     continue
 
@@ -858,14 +949,21 @@ class DialogManager:
                 # ========================== IDLE mode ==========================
                 if self.state == self.IDLE:
                     ww_hit = False
-                    # Check for wake word
+                    wakeword_handoff_frames.append(clean.copy())
+
                     if self.ww.enabled:
-                        ema, fired = self.ww.step(clean_f32)
-                        # print(f"\r[WakeWord] ema: {ema:0.3f}   ", end="", flush=True)
+                        score, fired, event = self.ww.step(clean_f32, now_ms=now_ms)
+                        if event is not None:
+                            self._log_wakeword_event(event)
+                            if self.save_wakeword_debug_audio:
+                                pending_wakeword_captures.append(
+                                    self._start_wakeword_debug_capture(event, list(wakeword_debug_frames))
+                                )
                         ww_hit = fired
+                    else:
+                        score = 0.0
 
                     if ww_hit or forced:
-                        # logger.info(f"Triggered by {'wake word' if ww_hit else 'system'}")
                         if ww_hit:
                             self._set_state(self.WAKEWORD_TRIGGER)
                             self._session_trigger_reason = self.WAKEWORD_TRIGGER
@@ -875,12 +973,14 @@ class DialogManager:
                         session_active = True
                         self._set_state(self.LISTENING)
                         utterance_frames = []
-                        self.mic.drain()  # ensure no stale frames from previous state
                         silence_ms_accum = 0
-                        preroll_frames.clear()
+                        preroll_frames = deque(wakeword_handoff_frames, maxlen=max(PRE_SPEECH_FRAMES, WAKEWORD_HANDOFF_FRAMES))
+                        wakeword_handoff_frames.clear()
                         utterance_ms = 0
                         had_any_speech = False
-                        self._last_activity_ms = int(time.time() * 1000.0)
+                        self.vad.reset()
+                        self.ww.reset()
+                        self._last_activity_ms = now_ms
                         continue
 
 
@@ -896,7 +996,7 @@ class DialogManager:
                             self.on_transcript(text)
                     except Exception as e:
                         logger.error(f"[TranscriptCallback] Error: {e}")
-                    self._last_activity_ms = int(time.time() * 1000.0)
+                    self._last_activity_ms = now_ms
                     if self.save_transcript_audio:
                         self._save_audio_debug(pcm_for_asr, SAMPLE_RATE, transcript=text)
 
@@ -910,12 +1010,15 @@ class DialogManager:
                         # else:
                             if session_active:
                                 self._set_state(self.LISTENING)
+                                self.ww.reset()
                             else:
                                 self._set_state(self.IDLE)
+                                self.ww.reset()
                         
                     utterance_frames = []
                     silence_ms_accum = 0
                     preroll_frames.clear()
+                    wakeword_handoff_frames.clear()
                     utterance_ms = 0
                     had_any_speech = False
                     self.vad.reset()
@@ -925,7 +1028,6 @@ class DialogManager:
 
                 # ======================== LISTENING / RECORDING mode ======================
                 if self.state in (self.LISTENING, self.RECORDING):
-                    now_ms = int(time.time() * 1000.0)
                     if now_ms < self._post_tts_mute_until:
                         # still in post-TTS mute window: drain and skip VAD
                         self.mic.drain()
@@ -966,8 +1068,7 @@ class DialogManager:
                                 else:
                                     self._set_state(self.TRANSCRIBING, poststring=f"({utterance_ms}ms)")
                         else:
-                            # build a small pre-roll before first VAD hit
-                            if PRE_SPEECH_FRAMES > 0:
+                            if preroll_frames.maxlen and preroll_frames.maxlen > 0:
                                 preroll_frames.append(clean.copy())
 
                     
@@ -978,16 +1079,19 @@ class DialogManager:
 
                 # --- session-wide inactivity timeout (works even if user never spoke) ---
                 if session_active and self.state not in (self.SPEAKING, self.THINKING):
-                    now_ms = int(time.time() * 1000.0)
                     if (now_ms - self._last_activity_ms) >= self.no_speech_timeout:
                         logger.info("[System] Inactivity timeout.")
                         session_active = False
                         self._session_trigger_reason = None
                         self._set_state(self.IDLE)
                         utterance_frames = []
+                        silence_ms_accum = 0
+                        preroll_frames.clear()
+                        wakeword_handoff_frames.clear()
                         utterance_ms = 0
                         had_any_speech = False
                         self.vad.reset()
+                        self.ww.reset()
                         self.mic.drain()
                         # (optional) tiny guard so the same WW window doesn't immediately refire
                         # time.sleep(0.05)

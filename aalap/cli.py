@@ -19,12 +19,14 @@ from .dialogue_manager import (
     VAD_SILERO_MIN_SPEECH_MS,
     VAD_SILERO_THRESHOLD,
     VAD_SILERO_WINDOW_MS,
-    WAKEWORD_ARM_THRESH,
-    WAKEWORD_DISARM_THRESH,
-    WAKEWORD_EMA_ALPHA,
+    WAKEWORD_DEBUG,
+    WAKEWORD_DEBUG_AUDIO_DIR,
+    WAKEWORD_DEBOUNCE_MS,
     WAKEWORD_KEYWORDS,
+    WAKEWORD_PATIENCE_FRAMES,
+    WAKEWORD_SCORE_THRESH,
+    SAVE_WAKEWORD_DEBUG_AUDIO,
     WAKEWORD_VAD_THRESHOLD,
-    WAKEWORD_WINDOW_MS,
     WHISPER_DEVICE,
     WHISPER_MODEL,
 )
@@ -45,11 +47,13 @@ CLI_DEFAULTS: dict[str, Any] = {
     "piper_quality": PIPER_QUALITY,
     "wakeword_keywords": WAKEWORD_KEYWORDS,
     "wakeword_model_paths": None,
-    "wakeword_window_ms": WAKEWORD_WINDOW_MS,
-    "wakeword_ema_alpha": WAKEWORD_EMA_ALPHA,
-    "wakeword_arm_thresh": WAKEWORD_ARM_THRESH,
-    "wakeword_disarm_thresh": WAKEWORD_DISARM_THRESH,
     "wakeword_vad_threshold": WAKEWORD_VAD_THRESHOLD,
+    "wakeword_score_thresh": WAKEWORD_SCORE_THRESH,
+    "wakeword_patience_frames": WAKEWORD_PATIENCE_FRAMES,
+    "wakeword_debounce_ms": WAKEWORD_DEBOUNCE_MS,
+    "wakeword_debug": WAKEWORD_DEBUG,
+    "save_wakeword_debug_audio": SAVE_WAKEWORD_DEBUG_AUDIO,
+    "wakeword_debug_audio_dir": WAKEWORD_DEBUG_AUDIO_DIR,
     "vad_silero_threshold": VAD_SILERO_THRESHOLD,
     "vad_silero_window_ms": VAD_SILERO_WINDOW_MS,
     "vad_silero_min_speech_ms": VAD_SILERO_MIN_SPEECH_MS,
@@ -89,11 +93,23 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--wakeword-model-paths",
         help="Comma-separated custom wakeword model paths matching --wakeword-keywords.",
     )
-    parser.add_argument("--wakeword-window-ms", type=int, help="Wakeword inference window size.")
-    parser.add_argument("--wakeword-ema-alpha", type=float, help="Wakeword EMA smoothing factor.")
-    parser.add_argument("--wakeword-arm-thresh", type=float, help="Wakeword trigger threshold.")
-    parser.add_argument("--wakeword-disarm-thresh", type=float, help="Wakeword re-arm threshold.")
     parser.add_argument("--wakeword-vad-threshold", type=float, help="openWakeWord internal VAD gating threshold 0-1. Set 0 to disable.")
+    parser.add_argument("--wakeword-score-thresh", type=float, help="Wakeword score threshold for a positive frame.")
+    parser.add_argument("--wakeword-patience-frames", type=int, help="Consecutive positive wakeword frames required before triggering.")
+    parser.add_argument("--wakeword-debounce-ms", type=int, help="Wakeword cooldown after a trigger.")
+    parser.add_argument(
+        "--wakeword-debug",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable or disable wakeword trigger/near-trigger logging.",
+    )
+    parser.add_argument(
+        "--save-wakeword-debug-audio",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable or disable saving wakeword trigger/near-trigger WAV clips.",
+    )
+    parser.add_argument("--wakeword-debug-audio-dir", help="Directory for wakeword debug audio clips.")
     parser.add_argument("--vad-silero-threshold", type=float, help="Silero VAD threshold 0-1.")
     parser.add_argument("--vad-silero-window-ms", type=int, help="Silero VAD rolling window size.")
     parser.add_argument("--vad-silero-min-speech-ms", type=int, help="Silero minimum speech duration.")
@@ -125,11 +141,13 @@ def _build_config(args: argparse.Namespace) -> dict[str, Any]:
         "piper_quality": args.piper_quality,
         "wakeword_keywords": _parse_list_arg(args.wakeword_keywords),
         "wakeword_model_paths": _parse_list_arg(args.wakeword_model_paths),
-        "wakeword_window_ms": args.wakeword_window_ms,
-        "wakeword_ema_alpha": args.wakeword_ema_alpha,
-        "wakeword_arm_thresh": args.wakeword_arm_thresh,
-        "wakeword_disarm_thresh": args.wakeword_disarm_thresh,
         "wakeword_vad_threshold": args.wakeword_vad_threshold,
+        "wakeword_score_thresh": args.wakeword_score_thresh,
+        "wakeword_patience_frames": args.wakeword_patience_frames,
+        "wakeword_debounce_ms": args.wakeword_debounce_ms,
+        "wakeword_debug": args.wakeword_debug,
+        "save_wakeword_debug_audio": args.save_wakeword_debug_audio,
+        "wakeword_debug_audio_dir": args.wakeword_debug_audio_dir,
         "vad_silero_threshold": args.vad_silero_threshold,
         "vad_silero_window_ms": args.vad_silero_window_ms,
         "vad_silero_min_speech_ms": args.vad_silero_min_speech_ms,
@@ -162,11 +180,13 @@ def _dialog_manager_kwargs(config: dict[str, Any]) -> dict[str, Any]:
         "piper_quality": config["piper_quality"],
         "wakeword_keywords": config["wakeword_keywords"],
         "wakeword_model_paths": config["wakeword_model_paths"],
-        "wakeword_window_ms": config["wakeword_window_ms"],
-        "wakeword_ema_alpha": config["wakeword_ema_alpha"],
-        "wakeword_arm_thresh": config["wakeword_arm_thresh"],
-        "wakeword_disarm_thresh": config["wakeword_disarm_thresh"],
         "wakeword_vad_threshold": config["wakeword_vad_threshold"],
+        "wakeword_score_thresh": config["wakeword_score_thresh"],
+        "wakeword_patience_frames": config["wakeword_patience_frames"],
+        "wakeword_debounce_ms": config["wakeword_debounce_ms"],
+        "wakeword_debug": config["wakeword_debug"],
+        "save_wakeword_debug_audio": config["save_wakeword_debug_audio"],
+        "wakeword_debug_audio_dir": config["wakeword_debug_audio_dir"],
         "vad_silero_threshold": config["vad_silero_threshold"],
         "vad_silero_window_ms": config["vad_silero_window_ms"],
         "vad_silero_min_speech_ms": config["vad_silero_min_speech_ms"],
