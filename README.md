@@ -16,7 +16,7 @@ Aalap is a Python voice-assistant dialogue manager that combines wake word detec
 
 ## Features
 
-- Wake word detection via [openWakeWord](https://github.com/dscripka/openWakeWord) with smoothing, hysteresis, and custom model support.
+- Wake word detection via [openWakeWord](https://github.com/dscripka/openWakeWord) with score threshold, patience, debounce, and custom model support.
 - Voice activity detection using [Silero VAD](https://github.com/snakers4/silero-vad).
 - Streaming ASR in a worker process using [faster-whisper](https://github.com/SYSTRAN/faster-whisper).
 - Offline TTS with [Piper](https://github.com/rhasspy/piper) or online TTS via [gTTS](https://github.com/pndurette/gTTS).
