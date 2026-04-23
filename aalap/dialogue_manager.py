@@ -85,7 +85,7 @@ SPEAK_START_GRACE_MS        = 150  # wait after starting TTS before checking pla
 # Wake word
 WAKEWORD_KEYWORDS = "hey_jarvis"
 WAKEWORD_VAD_THRESHOLD = 0.00   # openWakeWord Silero VAD gating; 0 disables
-WAKEWORD_SCORE_THRESH  = 0.45
+WAKEWORD_SCORE_THRESH  = 0.30
 WAKEWORD_PATIENCE_FRAMES = 2
 WAKEWORD_DEBOUNCE_MS   = 900
 WAKEWORD_HANDOFF_MS    = 400
