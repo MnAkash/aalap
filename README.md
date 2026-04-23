@@ -55,6 +55,12 @@ choco install portaudio ffmpeg
 ### Install with pip (no clone)
 
 ```bash
+# linux
+python3 -m pip install "git+https://github.com/MnAkash/aalap.git"
+```
+
+```bash
+# windows
 python -m pip install "git+https://github.com/MnAkash/aalap.git"
 ```
 
